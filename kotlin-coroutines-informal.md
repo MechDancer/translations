@@ -326,7 +326,7 @@ launch(Swing) {
 }
 ```
 
-### 限制的挂起
+### Restricted 的挂起
 
 
 
