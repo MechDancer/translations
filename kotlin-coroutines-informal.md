@@ -189,7 +189,7 @@ private class StandaloneCoroutine(override val context: CoroutineContext): Conti
 }
 ```
 
-这个实现定义了一个简单类  `StandaloneCoroutine`，它代表了这个协程，实现了 `Continuation` 接口，用于捕获它的完成。这个协程的完成调用了它的 *completion continuation*。它的 `resume` 或 `resumeWithException` 函数在协程完成时被调用，相应地伴随着结果或异常。因为  `launch`  "fire-and-forget"  一个协程，它为了挂起函数，定义为返回 `Unit` 类型，实际上忽略了在它 `resume` 函数中的结果。如果协程执行伴随异常，当前线程的 uncaught exception handler 会被用于去报告这个异常。
+这个实现定义了一个简单类  `StandaloneCoroutine`，它代表了这个协程，实现了 `Continuation` 接口，用于捕获它的完成。这个协程的完成调用了它的 *completion continuation*。它的 `resume` 或 `resumeWithException` 函数在协程完成时被调用，相应地伴随着结果或异常。因为  `launch`  "fire-and-forget"  一个协程，它为了挂起函数 *(喵喵喵?)*，定义为返回 `Unit` 类型，实际上忽略了在它 `resume` 函数中的结果。如果协程执行伴随异常，当前线程的 uncaught exception handler 会被用于去报告这个异常。
 
 > 注意：这个简单实现返回了 `Unit` ，没有提供任何协程状态的访问。实际上在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中的实现要更加复杂，因为它返回了一个 `Job` 实例，代表这个协程并且可以被取消。
 
@@ -203,7 +203,7 @@ fun <T> (suspend  () -> T).startCoroutine(completion: Continuation<T>)
 
  `startCoroutine`  创建协程并在当前线程中立刻启动执行（但请参阅下面的备注），直到第一个挂起点会返回。挂起点时协程主体中调用某些挂起函数，它由相应挂起函数代码来定义协程恢复执行的时间和方式。
 
-> 注意：协程拦截器（来源于 context）在后文中会提到，它能够将协程的执行，*包括* 它的初始 continuation 调度到另一个线程中。
+> 注意：continuation 拦截器（来源于 context）在后文中会提到，它能够将协程的执行，*包括* 它的初始 continuation 调度到另一个线程中。
 
 ### 协程 Context
 
@@ -230,13 +230,101 @@ interface CoroutineContext {
 
  `CoroutineContext`  本身有四种可用的核心操作：
 
-* 操作符 `get` 提供对给定键元素类型安全的访问，可以使用 `[..]` 符号。可以这样做的原因请见 Kotlin 操作符重载。
-* 函数 `fold` 类似于标准库中 `Collection.fold` 扩展函数，提供迭代 context 中所有元素的方法。
-* 操作符 `plus` 类似于标准库的 `Set.plus` 扩展函数，返回
+* 操作符 `get` 提供对给定键元素类型安全的访问，可以使用 `[..]` 符号。对于可以这样做的原因解释请见 [Kotlin 操作符重载](https://kotlinlang.org/docs/reference/operator-overloading.html)。
+* 函数 `fold` 类似于标准库中 [`Collection.fold`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/fold.html) 扩展函数，提供迭代 context 中所有元素的方法。
+* 操作符 `plus` 类似于标准库的 [`Set.plus`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/plus.html) 扩展函数，返回两个 context 的组合, 右边的元素加上替换左侧的相同键的元素。 *(喵喵喵?)*
+* 函数 `minueKey` 返回不包含指定键的 context。
 
-### 协程拦截器
+协程 context 的一个 `Element` 就是它自己。它是仅具有此元素的单个 context。 *(喵喵喵?)*
 
+这样就可以通过协程 context 元素的库定义，使用 `+` 连接它们来创建一个复合 context。举个例子，如果一个库定义 `auth` 元素带着用户授权信息，一些其他的库定义 `CommonPool` 对象带着一些协程执行信息，你就可以使用协程建造者 `launch{}` 并且使用组合 context `launch(auth + CommonPool){...}` 调用。
 
+> 注意： [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 提供了几个 context 元素，包括将协程执行调度在一个共享后台线程池中的 `CommonPool`。
+
+所有库定义的 context 元素应该继承标准库提供的  `AbstractCoroutineContextElement` 类。对于库定义的 context 元素，建议使用一下样式。下面的这个例子显示了一个设想的授权 context 元素，它储存了当前用户名：
+
+```kotlin
+class AuthUser(val name: String) : AbstractCoroutineContextElement(AuthUser) {
+    companion object Key : CoroutineContext.Key<AuthUser>
+}
+```
+
+将 context 的 `Key` 定义为相应元素类的伴生对象能够流畅访问 context 中的相应元素。这是一个设想的挂起函数实现，它需要检查当前用户名：
+
+```kotlin
+suspend fun secureAwait(): Unit = suspendCoroutine { cont ->
+    val currentUser = cont.context[AuthUser]?.name
+    // do something user-specific
+}
+```
+
+### Continuation 拦截器
+
+让我们回想一下 [异步 UI](x) 用例。异步 UI 应用程序必须保证协程程序体始终在 UI 线程中执行，尽管各种挂起函数在任意线程中回复协程执行。这是使用 *Continuation 拦截器*  完成的。首先，我们要充分了解协程的生命周期。思考一下用了协程建造者 `launch{}` 的代码片段：
+
+```kotlin
+launch(CommonPool) {
+    initialCode() // initial code 执行
+    f1.await() // 挂起点 #1
+    block1() // 执行 #1
+    f2.await() // 挂起点 #2
+    block2() // 执行 #2
+}
+```
+协程从 `initialCode` 开始执行，直到第一个挂起点。在挂起点时，协程 *挂起。*一段时间后按照相应挂起函数的定义，协程恢复执行 `block1`，接着再次挂起，在 *完成* 后恢复执行 `block2`。Continuation 拦截器可以拦截和包装与 `initialCode` ,`block1`, 和`block2` 执行相对应的 continuation，使其恢复到之后的挂起点。
+
+协程的 initial code 被视为 *initial continuation* 的 resumption。标准库提供了以下接口：
+
+```kotlin
+interface ContinuationInterceptor : CoroutineContext.Element {
+    companion object Key : CoroutineContext.Key<ContinuationInterceptor>
+    fun <T> interceptContinuation(continuation: Continuation<T>): Continuation<T>
+}
+```
+ `interceptContinuation` 包装了协程的 continuation。每当协程被挂起时，协程框架用下行代码包装实际后续恢复的 `continuation`：
+
+```kotlin
+val facade = continuation.context[ContinuationInterceptor]?.interceptContinuation(continuation) ?: continuation
+```
+协程框架为每个实际的 continuation 实例缓存结果 facade。有关详细信息, 请参阅实现细节部分。
+
+> 注意，像 `await` 这样的挂起函数可能会或可能不会实际挂起协程的执行。举个例子，看看在 [挂起函数](#挂起函数) 部分提到 `await` 的实现，当 future 已经完成时（在这种情况下 `resume` 会立刻被调用，协程的执行没有被挂起）就不会使协程真正挂起。只有当协程执行真正被挂起时，一个 continuation 才会被拦截，即当 `suspendCoroutine` 函数体返回但并没有调用 `resume`。
+
+让我们来看看一个用于 `Swing` 拦截器的具体实例代码，它将执行调度在 Swing UI 事件调度线程上。我们从一个包装类 `SwingContinuation` 开始，它检查当前线程并且确保 continuation 只在 Swing 事件调度线程中恢复。如果执行已经在 UI 线程中发生， `Swing` 仅仅合适地调用 `cont.resume`，否则它会使用 `SwingUtilities.invokeLater` 将 continuation 的执行调度在 Swing UI 线程上。
+
+```kotlin
+private class SwingContinuation<T>(val cont: Continuation<T>) : Continuation<T> by cont {
+    override fun resume(value: T) {
+        if (SwingUtilities.isEventDispatchThread()) cont.resume(value)
+        else SwingUtilities.invokeLater { cont.resume(value) }
+    }
+
+    override fun resumeWithException(exception: Throwable) {
+        if (SwingUtilities.isEventDispatchThread()) cont.resumeWithException(exception)
+        else SwingUtilities.invokeLater { cont.resumeWithException(exception) }
+    }
+}
+```
+接着定义了一个 `Swing` 对象作为相应的 context 元素，并实现了 `ContinuationInterceptor` 接口：
+
+```kotlin
+object Swing : AbstractCoroutineContextElement(ContinuationInterceptor), ContinuationInterceptor {
+    override fun <T> interceptContinuation(continuation: Continuation<T>): Continuation<T> =
+        SwingContinuation(continuation)
+}
+```
+
+> 你可以从 [这里](https://github.com/Kotlin/kotlin-coroutines/blob/master/examples/context/swing.kt) 获得这部分代码。
+>
+> 注意：`Swing` 对象在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中实际实现还支持了 debug 功能，这提供并显示了协程的标识和当前运行协程的线程名。
+
+现在，可以使用协程建造者 `launch{}` 带着 `Swing` 参数来执行一个完全运行在 Swing 事件调度线程中的协程：
+
+```kotlin
+launch(Swing) {
+   // code in here can suspend, but will always resume in Swing EDT
+}
+```
 
 ### 限制的挂起
 
