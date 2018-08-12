@@ -380,11 +380,23 @@ launch(Swing) {
 
 ## 实现细节
 
-
+本节提供了协程实现细节的一小部分。它们隐藏在 [协程概述](#协程概述) 部分解释的构造代码块背后，内部类和代码的生成策略在不打破公共 API 和 ABI 的约定下是会改变的。
 
 ### 协程传递样式
 
+挂起函数通过 Continuation-Passing-Style (CPS) 实现。每个挂起函数和挂起 lambda 都有一个附加的 `Continuation` 参数， continuation 隐式地在调用时传递。回想一下，[`await` 挂起函数](#挂起函数) 的定义是这样的：
 
+```kotlin
+suspend fun <T> CompletableFuture<T>.await(): T
+```
+
+然而在 *CPS 变换* 之后，它的实际实现具有具有以下签名：
+
+```kotlin
+fun <T> CompletableFuture<T>.await(continuation: Continuation<T>): Any?
+```
+
+它的返回类型 `T` 移到了附加参数的 continuation 上。实现中的返回值 `Any?` 是用于代表挂起函数的动作。当挂起函数 *挂起* 协程时，函数返回一个特别的标识值 `COROUTINE_SUSPENDED`。当一个挂起函数没有挂起协程，协程继续执行时，它返回函数结果或者直接抛出异常。这样以来，`await` 函数实现中的返回值 `Any?` 实际上是 `T` 和  `COROUTINE_SUSPENDED` 的联合类型，这并不能在 Kotlin 的类型系统中表示出来。挂起函数的实现实际上不允许调用其栈帧中的 continuation，因为这可能导致长时间运行的协程栈溢出。标准库中的 `suspendCoroutine` 通过追踪 continuation 的调用保证了挂起函数与实际实现一致性的约定，无论 continuation 在何时怎样调用，对应用开发者隐藏它的复杂性。
 
 ### 状态机
 
