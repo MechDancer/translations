@@ -342,7 +342,23 @@ launch(Swing) {
 
 
 
-### 非阻塞延迟
+### 非阻塞睡眠
+
+协程不应使用 [`Thread.sleep`](https://docs.oracle.com/javase/8/docs/api/java/lang/Thread.html#sleep-long-)，因为它阻塞了线程。但是，通过 Java 的 [`ScheduledThreadPoolExecutor`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ScheduledThreadPoolExecutor.html) 实现挂起的非阻塞 `delay` 函数是非常简单的。
+
+```kotlin
+private val executor = Executors.newSingleThreadScheduledExecutor {
+    Thread(it, "scheduler").apply { isDaemon = true }
+}
+
+suspend fun delay(time: Long, unit: TimeUnit = TimeUnit.MILLISECONDS): Unit = suspendCoroutine { cont ->
+    executor.schedule({ cont.resume(Unit) }, time, unit)
+}
+```
+
+> 你可以从 [这里](https://github.com/Kotlin/kotlin-coroutines/blob/master/examples/delay/delay.kt) 获取到这段代码。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines)  同样提供了 `delay` 函数。
+
+
 
 
 
