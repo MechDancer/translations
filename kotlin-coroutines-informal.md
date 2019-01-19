@@ -48,9 +48,9 @@ launch {
 }
 ```
 
-`aRead()` 和 `aWrite()` 是特别的 *挂起函数* —— 它们可以 *挂起*  代码执行（这并不意味着阻塞运行他们的线程），然后在调用完成时 *恢复*  代码执行。如果我们眯着眼睛去想象所有在 `aRead()` 之后的代码已经被包装成一个 lambda 传给 `aRead()` 作为回调，再对 `aWrite()` 做同样的事情，我们就可以看到和上面相同的代码，只是可读性增加了。
+`aRead()` 和 `aWrite()` 是特别的*挂起函数* —— 它们可以*挂起* 代码执行（这并不意味着阻塞运行他们的线程），然后在调用完成时*恢复*  代码执行。如果我们眯着眼睛去想象所有在 `aRead()` 之后的代码已经被包装成一个 lambda 传给 `aRead()` 作为回调，再对 `aWrite()` 做同样的事情，我们就可以看到和上面相同的代码，只是可读性增加了。
 
-以一种非常通用的方式支持协程是我们的明确目标，所以在这个例子中，`launch{}`, `.aRead()`, 和 `.aWrite()` 只是适应协程工作的库函数；`launch` 是 *协程建造者* —— 它创建并启动协程；`aRead()` 和 `aWrite()` 作为特别的 *挂起函数* 隐式地接受 *continuations*（continuations 只是一般的回调）。
+以一种非常通用的方式支持协程是我们的明确目标，所以在这个例子中，`launch{}`、`.aRead()` 和 `.aWrite()` 只是适应协程工作的库函数；`launch` 是*协程建造者* —— 它创建并启动协程；`aRead()` 和 `aWrite()` 作为特别的*挂起函数* 隐式地接受*continuations*（continuations 只是一般的回调）。
 
 > 关于 `launch{}` 的示例代码在 [协程建造者]() 一节，关于 `aRead()` 的示例代码在 [包装性回调]() 一节。
 
@@ -77,7 +77,7 @@ launch {
 
 ### 特性
 
-还有另一种表达异步计算的方式：通过期货（或者叫做承诺、延时）。我们在示例中使用一个虚构的 API，对图像应用一个覆盖：
+还有另一种表达异步计算的方式：通过期货（或者叫做诺言、延时）。我们在示例中使用一个虚构的 API，对图像应用一个覆盖：
 
 ```kotlin
 val future = runAfterBoth(
@@ -168,26 +168,26 @@ val seq = sequence {
 
 本部分概述了能够编写协程的语言机制和管理其语义的标准库。
 
-### 协程的实验状态
-
 ### 术语
 
-* *协程* —— 是一个*可挂起计算* 的 *实例* 。它在概念上类似于一个线程，在这个意义上，它需要一个代码块运行，并具有类似的生命周期 —— 它可以被创建和启动，但它不绑定到任何特定的线程。它可以在一个线程中 *挂起* 其执行， 并在另一个线程中 *恢复* 。而且，像一个 future 或一个 promise，它在完成时可能伴随着结果或异常。
+* *协程* —— *可挂起计算* 的*实例* 。它在概念上类似于一个线程，在这个意义上，它需要一个代码块运行，并具有类似的生命周期 —— 它可以被创建和启动，但它不绑定到任何特定的线程。它可以在一个线程中*挂起* 其执行， 并在另一个线程中*恢复* 。而且，像期货或诺言那样，它在*完成* 时可能伴随着结果（值或异常）。
 
-* *挂起函数* —— 一个函数被标记了 `suspend` 修饰符。它可能会 *挂起* 执行代码, 而不通过调用其他挂起函数来阻塞当前执行线程。一个挂起函数不能在常规代码中被调用，除了在其他挂起函数或挂起 lambda 中（见下方）。举个例子，如用例所示，`.await()` 和 `yield()` ，是在库中定义的挂起函数。标准库提供了用于定义其他所有挂起函数所使用的基础挂起函数。
+* *挂起函数* —— `suspend` 修饰符标记的函数。它可能会通过调用其他挂起函数*挂起* 执行代码，而不阻塞当前执行线程。一个挂起函数不能在常规代码中被调用，只能在其他挂起函数或挂起 lambda 中（见下方）。举个例子，如用例所示的 `.await()` 和 `yield()` 是在库中定义的挂起函数。标准库提供了用于定义其他所有挂起函数所使用的基础挂起函数。
 
-* *挂起 lambda* —— 一个必须在协程中运行的代码块。它看起来完全像一个普通的 lambda 表达式，但它的函数类型被  `suspend` 修饰符标记。就像常规 lambda 表达式是匿名局部函数的短语法形式一样，挂起lambda 是匿名挂起函数的短语法形式。它可能会 *挂起* 执行代码, 而不通过调用其他挂起函数来阻塞当前执行线程。举个例子，如用例所示，跟在 `launch` , `future` , 和 `BuildSequence` 函数后面花括号之后的代码块，就是挂起 lambda。
+* *挂起 lambda* —— 一个必须在协程中运行的代码块。它看起来完全像一个普通的 lambda 表达式，但它的函数类型被  `suspend` 修饰符标记。就像常规 lambda 表达式是匿名局部函数的短语法形式一样，挂起 lambda 是匿名挂起函数的短语法形式。它可能会通过调用其他挂起函数*挂起* 执行代码，而不阻塞当前执行线程。举个例子，如用例所示，跟在 `launch` , `future` , 和 `BuildSequence` 函数后面花括号里的代码块，就是挂起 lambda。
 
-* *挂起函数类型*  —— 一种用于挂起函数和挂起 lambda 的函数类型。它就像一个常规的函数类型，但具有 `suspend` 修饰符。举个例子，`suspend () -> Int ` 是一个没有参数、返回 `Int` 的挂起函数的函数类型。一个像这样声明 —— `suspend fun foo(): Int` 的挂起函数符合上述函数类型。
+  > 注意：如果允许 lambda 使用非局部的返回语句，则挂起 lambda 可以在代码的任意位置调用挂起函数。意思是说，可以在像 `apply{}` 这样的内联 lambda 中调用挂起函数，但在 `noinline` 和 `crossinline` 修饰的 lambda 中就不行。*挂起* 会被视作是一种特殊的非局部控制转移。
 
-* *协程建造者* —— 一个使用一些挂起 lambda 作为参数，创建一个协程，可选地提供某种形式对其结果的访问的函数。举个例子，用例中的 `launch{}`, `future{}`, 和 `buildSequence{}` 是库中定义的协程建造者。 标准库提供了用于定义其他所有协程建造者所使用的基础协程建造者。
+* *挂起函数类型*  —— 挂起函数和挂起 lambda 的函数类型。它就像一个常规的函数类型，但具有 `suspend` 修饰符。举个例子，`suspend () -> Int ` 是一个没有参数、返回 `Int` 的挂起函数的函数类型。一个像这样声明 —— `suspend fun foo(): Int` 的挂起函数符合上述函数类型。
 
-* *挂起点* —— 是协程执行过程中可能会被 *挂起* 的一个点。从语法上说，一个挂起点是对一个挂起函数的调用，但 *实际* 的挂起在挂起函数调用了标准库中的原始挂起函数时发生。
+* *协程建造者* —— 使用一些挂起 lambda 作为参数，创建一个协程，可选地提供某种形式的对其结果的访问的函数。举个例子，用例中的 `launch{}`, `future{}`, 和 `sequence{}` 是库中定义的协程建造者。 标准库提供了用于定义其他所有协程建造者所使用的基础协程建造者。
+
+* *挂起点* —— 协程执行过程中可能会被*挂起* 的位置。从语法上说，一个挂起点是对一个挂起函数的调用，但*实际* 的挂起在挂起函数调用了标准库中的原始挂起函数时发生。
 
 * *continuation* —— 是一个挂起的协程在挂起点时的一个状态。它在概念上代表它在挂起点之后的剩余执行代码。一个例子：
 
   ```kotlin
-  buildSequence {
+  sequence {
       for (i in 1..10) yield(i * i)
       println("over")
   }  
@@ -195,103 +195,103 @@ val seq = sequence {
 
   在这里，每次调用挂起函数 `yield()`，协程挂起时，*其执行的剩余* 被看作 continuation，所以我们有 10 个 continuation：第一次运行循环后 `i=2` ，挂起；第二次运行循环后 `i=3`，挂起……最后一个打印 "over" 并完成协程。该协程在此创建，但尚未启动，由它的初始 *continuation* 所表示，后者由它整个执行组成，类型为 `Continuation<Unit> ` 。
 
-如上所述，驱动协程的要求之一是灵活性：我们希望能够支持许多现有的异步 API 和其他用例,，并将硬编码的部分最小化到编译器中。因此， 编译器只负责支持挂起函数、挂起 lambda 时和相应的挂起函数类型。标准库中的原始函数很少， 其余的则留给应用程序库。
+如上所述，驱动协程的要求之一是灵活性：我们希望能够支持许多现有的异步 API 和其他用例,，并将硬编码到编译器中的部分最小化。因此，编译器只负责支持挂起函数、挂起 lambda 时和相应的挂起函数类型。标准库中的原始函数很少， 其余的则留给应用程序库。
 
 ### Continuation 接口
 
-这是标准库中接口 `Continuation` 的定义，代表了一个通用的回调：
+这是标准库中接口 `Continuation` 的定义（位于 `kotlinx.coroutines` 包），代表了一个通用的回调：
 
 ```kotlin
 interface Continuation<in T> {
    val context: CoroutineContext
-   fun resume(value: T)
-   fun resumeWithException(exception: Throwable)
+   fun resumeWith(result: Result<T>)
 }
 ```
 
-context 在协程上下文中详细介绍，表示于任意用户定义的与协程所关联的上下文。函数 `resume` 和 `resumeWithException` 是用于提供一个成功结果（通过 `resume`）或报告失败（通过 `resumeWithException`）。
+context 将在[协程上下文]()一节中详细介绍，表示与协程关联的任意用户定义上下文。`resumeWIth` 函数是一个完结回调，用于报告协程完结时成功（带有值）或失败（带有异常）的结果。
+
+为了方便，包里还定义了两个扩展函数：
+
+```kotlin
+fun <T> Continuation<T>.resume(value: T)
+fun <T> Continuation<T>.resumeWithException(exception: Throwable)
+```
 
 ### 挂起函数
 
-一个典型的 *挂起函数* 例如 `.await()` 的实现看起来是这样的：
+一个典型的*挂起函数* 的某种实现，例如 `.await()` ，起来是这样的：
 
 ```kotlin
 suspend fun <T> CompletableFuture<T>.await(): T =
     suspendCoroutine<T> { cont: Continuation<T> ->
         whenComplete { result, exception ->
-            if (exception == null)
+            if (exception == null) // 期货正常完成了
                 cont.resume(result)
-            else
+            else // 期货完成中产生了异常
                 cont.resumeWithException(exception)
         }
     }
 ```
 
-`suspend` 修饰符表明这个函数可以挂起协程的执行。这个特别的函数是作为类型 `CompletableFuture<T>` 的扩展函数，以便其使用阅读时与实际执行顺序相应的为自然顺序 —— 从左到右：
+> 你可以在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/future/await.kt)找到代码。这个简单的实现只要期货不完成就会永远挂起协程。[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中的实际实现还支持取消。
+
+`suspend` 修饰符表明这个函数可以挂起协程的执行。这个特别的函数是作为类型 `CompletableFuture<T>` 的[扩展函数](https://kotlinlang.org/docs/reference/extensions.html)，以便其能正常地从左到右读，并且与实际执行顺序一致：
 
 ```kotlin
-asyncOperation(...).await()
+doSomethingAsync(...).await()
 ```
 
 `suspend` 修饰符可以用于任何函数：顶层函数、扩展函数、成员函数，或操作符函数。
 
-> 注意，在目前版本中，局部函数、属性的 getter/setter，和构造器不能拥有 `suspend` 修饰符。
+> 属性的取值器和设值器、构造器以及某些操作符函数（包括 `getValue`，`setValue`，`provideDelegate`，`get`，`set` 以及 `equals`）不能拥有 `suspend` 修饰符。这些限制将来可能会被消除。
 >
-> 这个限制在将来会被取消。
 
-挂起函数可以调用任何常规函数，但要真正挂起执行，必须调用一些其他的挂起函数。特别的是，这个 `await` 实现调用了在标准库中定义的顶层挂起函数 `suspendCoroutine`：
+挂起函数可以调用任何常规函数，但要真正挂起执行，必须调用一些其他的挂起函数。特别的是，这个 `await` 实现调用了在标准库中定义的顶层挂起函数 `suspendCoroutine`（位于 `kotlinx.coroutines` 包）：
 
 ```kotlin
 suspend fun <T> suspendCoroutine(block: (Continuation<T>) -> Unit): T
 ```
 
-当  `suspendCoroutine` 在一个协程中被调用时（它只可能在协程中被调用，因为它是一个挂起函数），它捕获了协程的执行状态到一个 *continuation* 实例，然后将其传给指定的 `block` 作为参数。为了恢复执行，代码块需要调用  `continuation.resume()`  或 `continuation.resumeWithException()` 在该线程或其他线程中。*实际* 的挂起发生当 `suspendCoroutine` 代码块没有返回上述两者。如果协程在代码块中直接被恢复，协程未被看作已经暂停并继续执行。
+当  `suspendCoroutine` 在一个协程中被调用时（它只可能在协程中被调用，因为它是一个挂起函数），它捕获了协程的执行状态到一个 *continuation* 实例，然后将其传给指定的 `block` 作为参数。为了恢复协程的执行，代码块之后需要调用 `continuation.resumeWith()`（直接调用或通过 `continuation.resume()` 或 `continuation.resumeWithException()` 调用）在该线程或其他线程中。*实际* 的协程挂起发生当 `suspendCoroutine` 代码块没有调用 `resumeWith` 就返回时。如果协程在代码块中直接被恢复，协程就不被看作已经暂停又继续执行。
 
+传给 `continuation.resumeWith()` 的值作为调用 `suspendCoroutine` 的结果，进一步成为 `.await()` 的结果。
 
-
-传给  `continuation.resume()`  的值作为  `suspendCoroutine()` 的返回值，相继成为 `.await()` 的返回值。
-
-
-
-多次恢复一个协程是不被允许的，并会产生  `IllegalStateException`。 
-
-
+多次恢复同一个协程是不被允许的，并会产生  `IllegalStateException`。 
 
 ### 协程建造者
 
-挂起函数不能够从常规函数中调用，所以标准库提供了用于在常规非挂起范围中开启协程的函数。这是简单 *协程建造者* `launch` 的实现：
+挂起函数不能够从常规函数中调用，所以标准库提供了用于在常规非挂起范围中开启协程的函数。这是简单的*协程建造者* `launch` 的实现：
 
 ```kotlin
-fun launch(context: CoroutineContext, block: suspend () -> Unit) =
-        block.startCoroutine(StandaloneCoroutine(context))
-
-private class StandaloneCoroutine(override val context: CoroutineContext): Continuation<Unit> {
-    override fun resume(value: Unit) {}
-
-    override fun resumeWithException(exception: Throwable) {
-        val currentThread = Thread.currentThread()
-        currentThread.uncaughtExceptionHandler.uncaughtException(currentThread, exception)
-    }
-}
+fun launch(context: CoroutineContext = EmptyCoroutineContext, block: suspend () -> Unit) =
+    block.startCoroutine(Continuation(context) { result ->
+        result.onFailure { exception ->
+            val currentThread = Thread.currentThread()
+            currentThread.uncaughtExceptionHandler.uncaughtException(currentThread, exception)
+        }
+    })
 ```
 
-这个实现定义了一个简单类  `StandaloneCoroutine`，它代表了这个协程，实现了 `Continuation` 接口，用于捕获它的完成。这个协程的完成调用了它的 *completion continuation*。它的 `resume` 或 `resumeWithException` 函数在协程完成时被调用，相应地伴随着结果或异常。因为  `launch`  "fire-and-forget"  一个协程，它为了挂起函数 *(喵喵喵?)*，定义为返回 `Unit` 类型，实际上忽略了在它 `resume` 函数中的结果。如果协程执行伴随异常，当前线程的 uncaught exception handler 会被用于去报告这个异常。
+> 你可以从[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/run/launch.kt)获取代码。
+
+这个实现使用了 [`Continuation(context) { ... }`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-continuation.html) 函数（来自 `kotlin.coroutines` 包），它提供了一个简写以实现包含其给定的 `context` 值和 `resumeWith` 函数所需的代码块的 `Continuation` 接口。这个 continuation 作为 *completion continuation* 被传给 [`block.startCoroutine(...)`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/start-coroutine.html) 扩展函数（来自 `kotlin.coroutines` 包）。
+
+协程在完成中将调用其 *completion continuation*。其 `resumeWith` 函数将在协程因成功或失败达到*完成* 状态时调用。因为 `launch` 是那种“即发即弃”式的协程，它被定义成返回 `Unit` 的挂起函数，实际上是无视了其 `resume` 函数的结果。如果协程异常结束，当前线程的未捕获异常句柄将用于报告这个异常。
 
 > 注意：这个简单实现返回了 `Unit` ，没有提供任何协程状态的访问。实际上在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中的实现要更加复杂，因为它返回了一个 `Job` 实例，代表这个协程并且可以被取消。
 
-context 在协程上下文中详细介绍。这里可以说，在库中定义协程建造者时包含 `context` 参数，为了更好的与其他库中定义的有用的上下文元素组合是一种很好的风格。
-
- `startCoroutine`  在标准库中作为挂起函数类型的扩展函数。它的签名是这样的：
+context 在[协程上下文]()一节中详细介绍。`startCoroutine` 在标准库中作为无参和单参数的挂起函数类型的扩展函数：
 
 ```kotlin
 fun <T> (suspend  () -> T).startCoroutine(completion: Continuation<T>)
+fun <R, T> (suspend  R.() -> T).startCoroutine(receiver: R, completion: Continuation<T>)
 ```
 
- `startCoroutine`  创建协程并在当前线程中立刻启动执行（但请参阅下面的备注），直到第一个挂起点会返回。挂起点时协程主体中调用某些挂起函数，它由相应挂起函数代码来定义协程恢复执行的时间和方式。
+`startCoroutine` 创建协程并在当前线程中立刻启动执行（但请参阅下面的备注），直到第一个挂起点时返回。挂起点是协程中某个挂起函数的调用，由相应的挂起函数的代码来定义协程恢复的时间和方式。
 
 > 注意：continuation 拦截器（来源于 context）在后文中会提到，它能够将协程的执行，*包括* 它的初始 continuation 调度到另一个线程中。
 
-### 协程 Context
+### 协程上下文
 
 协程 context 是一个可以附加到协程中的一组持久的用户定义对象。它可以包括负责协程线程策略的对象，日志，协程执行的安全性和事务方面，协程的标识和名称等等。这里是协程和 context 的简单心智模型 *(喵喵喵?)* 。把协程看作一个轻量线程。在这种情况下，协程 context 仅仅像一个 thread-local 变量的 set。不同之处在于 thread-local 是可变的，协程 context 是不可变的。但对于协程这并不是一个严重的限制，因为他们是如此轻量以至于当 context 改变时可以很容易地开一个新的协程。
 
