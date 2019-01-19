@@ -6,7 +6,7 @@
 
 ### 异步计算
 
-最能描述协程功能用例是异步计算（在 C# 及其他语言中通过 async/await 实现）。让我们来看看如何使用回调来完成这些计算。不妨以异步 I/O 为例（下面的 API 经过简化）：
+最能描述协程功能用例是异步计算（在 C# 及其他语言中通过 `async`/`await` 实现）。让我们来看看如何使用回调来完成这些计算。不妨以异步 I/O 为例（下面的 API 经过简化）：
 
 ```kotlin
 // 异步读数据到 `buf`，完成后执行 λ
@@ -75,9 +75,90 @@ launch {
 
 可想而知，在协程中处理异常也会稍微方便一些。
 
-### Futures
+### 特性
 
-### Generators
+还有另一种表达异步计算的方式：通过期货（或者叫做承诺、延时）。我们在示例中使用一个虚构的 API，对图像应用一个覆盖：
+
+```kotlin
+val future = runAfterBoth(
+    loadImageAsync("...original..."), // 创建期货
+    loadImageAsync("...overlay...")   // 创建期货
+) {
+    original, overlay ->
+    ...
+    applyOverlay(original, overlay)
+}
+```
+
+使用协程，可以写成这样：
+
+```kotlin
+val future = future {
+    val original = loadImageAsync("...original...") // 创建期货
+    val overlay = loadImageAsync("...overlay...")   // 创建期货
+    ...
+    // 挂起等待图片加载
+    // 图像和覆盖都加载完后执行 `applyOverlay(...)`
+    applyOverlay(original.await(), overlay.await())
+}
+```
+
+> 关于 `future{}` 的示例代码在 [创建期货]() 一节，关于 `await()` 的示例代码在 [挂起函数]() 一节。
+
+再一次地，协程对期货的支持减少了缩进级别、逻辑（以及异常处理，这里没有出现）更加自然，而且没有使用专门的关键字（比如 C#、JS 以及其他语言中的 `async` 和 `await`）:`future{}` 和 `await()` 都只是库函数而已。
+
+### 生成器
+
+协程的另一个典型用例是延时计算序列（在 C#、Python 和很多其他语言中通过 `yield`  实现）。这样的序列可以由看似连续的代码生成，但在运行时只计算真正用到的元素。
+
+```kotlin
+// 类型推断为 Sequence<Int>
+val fibonacci = sequence {
+    yield(1) // 斐波那契数列的首项
+    var cur = 1
+    var next = 1
+    while (true) {
+        yield(next) // 斐波那契数列的下一项
+        val tmp = cur + next
+        cur = next
+        next = tmp
+    }
+}
+```
+
+代码创建里一个表示[斐波那契数列](https://zhuanlan.zhihu.com/p/26752744)的延迟序列，它可以是无限长的（类似 [Haskell 中的无限长列表](http://www.techrepublic.com/article/infinite-list-tricks-in-haskell/)）。我们可以计算其中一些，例如，通过 `take()`：
+
+```kotlin
+println(fibonacci.take(10).joinToString())
+```
+
+> 这会打印出 `1, 1, 2, 3, 5, 8, 13, 21, 34, 55 `。你可以在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/sequence/fibonacci.kt)试一下。
+
+生成器中支持任意的控制流，包括但不限于 `while`、`if`、`try`/`catch`/`finally`：
+
+```kotlin
+val seq = sequence {
+    yield(firstItem) // 挂起点
+    
+    for (item in input) {
+        if (!item.isValid()) break // 不再生成项
+        val foo = item.toFoo()
+        if (!foo.isGood()) continue
+        yield(foo) // 挂起点        
+    }
+    
+    try {
+        yield(lastItem()) // 挂起点
+    }
+    finally {
+        // 一些收尾代码
+    }
+} 
+```
+
+> 关于 `sequence{}` 和 `yield()` 的示例代码在 [受限挂起]() 一节。
+
+注意，这种方法还允许把 `yieldAll(sequence)` 表示为库函数（像 `sequence{}` 和 `yield()` 那样），这能简化延时序列的连接操作，并允许高效的实现。
 
 ### 异步 UI
 
