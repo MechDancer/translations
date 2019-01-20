@@ -160,9 +160,54 @@ val seq = sequence {
 
 注意，这种方法还允许把 `yieldAll(sequence)` 表示为库函数（像 `sequence{}` 和 `yield()` 那样），这能简化延时序列的连接操作，并允许高效的实现。
 
-### 异步 UI
+### 异步用户界面
+
+典型的用户界面应用有一个事件调度线程，所有界面操作都发生在这个线程上。不允许在其他线程修改界面状态。所有用户界面库都提供某种原生方案，把操作挪到界面线程中执行。例如，Swing 的 [`SwingUtilities.invokeLater`](https://docs.oracle.com/javase/8/docs/api/javax/swing/SwingUtilities.html#invokeLater-java.lang.Runnable-)，JavaFX 的 [`Platform.runLater`](https://docs.oracle.com/javase/8/javafx/api/javafx/application/Platform.html#runLater-java.lang.Runnable-)，Android 的 [`Activity.runOnUiThread`](https://developer.android.com/reference/android/app/Activity.html#runOnUiThread(java.lang.Runnable)) 等等。这里有一段来自典型 Swing 应用的代码，执行一些异步操作，并把结果显示到用户界面：
+
+```kotlin
+makeAsyncRequest {
+    // 异步操作完成时执行这个 λ
+    result, exception ->
+    
+    if (exception == null) {
+        // 在 UI 线程显示结果
+        SwingUtilities.invokeLater {
+            display(result)   
+        }
+    } else {
+       // 异常处理
+    }
+}
+```
+
+这很像我们之间在[异步计算](#异步计算)用例见过的回调地狱，所以也能通过协程优雅地解决：
+
+```kotlin
+launch(Swing) {
+    try {
+        // 执行异步请求时挂起
+        val result = makeRequest()
+        // 在界面上显示结果，Swing 上下文保证了我们呆在事件调度线程上
+        display(result)
+    } catch (exception: Throwable) {
+        // 异常处理
+    }
+}
+```
+
+> `Swing` 上下文的示例代码在[续体拦截器](#续体拦截器)一节。
+
+所有的异常处理也都可以使用自然的语法结构执行。
 
 ### 更多用例
+
+协程可以覆盖更多用例，比如下面这些：
+
+* 基于通道的并发（就是 go 协程和通道）；
+* 基于 Actor 模式的并发；
+* 偶尔需要用户交互的后台进程，例如显示模式对话框；
+* 通信协议：将每个参与者实现为一个序列，而不是状态机；
+* Web应用程序工作流：注册用户、验证电子邮件、登录它们（挂起的协程可以序列化并存储在数据库中）。
 
 ## 协程概述
 
