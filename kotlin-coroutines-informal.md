@@ -52,7 +52,7 @@ launch {
 
 以一种非常通用的方式支持协程是我们的明确目标，所以在这个例子中，`launch{}`、`.aRead()` 和 `.aWrite()` 只是适应协程工作的库函数；`launch` 是*协程建造者* —— 它创建并启动协程；`aRead()` 和 `aWrite()` 作为特别的*挂起函数* 隐式地接受*续体*（[*续体*](https://aisia.moe/2018/02/08/kotlin-coroutine-kepa/) 就是一般的回调）。
 
-> 关于 `launch{}` 的示例代码在 [协程建造者](#协程建造者) 一节，关于 `aRead()` 的示例代码在 [包装性回调](#包装性回调) 一节。
+> 关于 `launch{}` 的示例代码在[协程建造者](#协程建造者)一节，关于 `aRead()` 的示例代码在[包装性回调](#包装性回调)一节。
 
 注意，显式传入的回调要在循环中异步调用通常非常棘手，但在协程中这不过是稀松平常的小事：
 
@@ -103,7 +103,7 @@ val future = future {
 }
 ```
 
-> 关于 `future{}` 的示例代码在 [创建期货](#创建期货) 一节，关于 `await()` 的示例代码在 [挂起函数](#挂起函数) 一节。
+> 关于 `future{}` 的示例代码在[创建期货](#创建期货)一节，关于 `await()` 的示例代码在[挂起函数](#挂起函数)一节。
 
 再一次地，协程对期货的支持减少了缩进级别、逻辑（以及异常处理，这里没有出现）更加自然，而且没有使用专门的关键字（比如 C#、JS 以及其他语言中的 `async` 和 `await`）:`future{}` 和 `await()` 都只是库函数而已。
 
@@ -126,7 +126,7 @@ val fibonacci = sequence {
 }
 ```
 
-代码创建里一个表示[斐波那契数列](https://zhuanlan.zhihu.com/p/26752744)的延迟序列，它可以是无限长的（类似 [Haskell 中的无限长列表](http://www.techrepublic.com/article/infinite-list-tricks-in-haskell/)）。我们可以计算其中一些，例如，通过 `take()`：
+代码创建里一个表示[斐波那契数列](https://zhuanlan.zhihu.com/p/26752744)的延迟序列，它可以是无限长的（类似[Haskell 中的无限长列表](http://www.techrepublic.com/article/infinite-list-tricks-in-haskell/)）。我们可以计算其中一些，例如，通过 `take()`：
 
 ```kotlin
 println(fibonacci.take(10).joinToString())
@@ -156,7 +156,7 @@ val seq = sequence {
 } 
 ```
 
-> 关于 `sequence{}` 和 `yield()` 的示例代码在 [受限挂起]() 一节。
+> 关于 `sequence{}` 和 `yield()` 的示例代码在[受限挂起]()一节。
 
 注意，这种方法还允许把 `yieldAll(sequence)` 表示为库函数（像 `sequence{}` 和 `yield()` 那样），这能简化延时序列的连接操作，并允许高效的实现。
 
@@ -397,11 +397,11 @@ suspend fun doSomething() {
 
 ### 续体拦截器
 
-让我们回想一下 [异步 UI](x) 用例。异步 UI 应用程序必须保证协程程序体始终在 UI 线程中执行，尽管各种挂起函数在任意线程中回复协程执行。这是使用 *Continuation 拦截器*  完成的。首先，我们要充分了解协程的生命周期。思考一下用了协程建造者 `launch{}` 的代码片段：
+让我们回想一下[异步用户界面](#异步用户界面)用例。异步界面应用程序必须保证协程程序体始终在界面线程中执行，尽管事实上各种挂起函数是在任意的线程中恢复协程执行。这是使用*续体拦截器* 完成的。首先，我们要充分了解协程的生命周期。思考一下用了协程建造者 `launch{}` 的代码片段：
 
 ```kotlin
 launch(CommonPool) {
-    initialCode() // initial code 执行
+    initialCode() // 执行初始化代码
     f1.await() // 挂起点 #1
     block1() // 执行 #1
     f2.await() // 挂起点 #2
