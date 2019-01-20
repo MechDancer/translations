@@ -258,6 +258,8 @@ suspend fun <T> suspendCoroutine(block: (Continuation<T>) -> Unit): T
 
 多次恢复同一个协程是不被允许的，并会产生  `IllegalStateException`。 
 
+> 注意：这正是 Kotlin 协程与像 Scheme 这样的函数式语言中的顶层 delimited continuation 以及 Haskell 中的 continuation 函子的关键区别。我们选择仅支持恢复 continuation 一次，完全是出于实用主义考虑，因为所有这些预期的[用例](https://github.com/Kotlin/KEEP/blob/master/proposals/coroutines.md#use-cases)都不需要多重 continuation。然而，还是可以在另外的库中实现多重 continuation，通过所谓协程本征，就是复制 continuation 中捕获的协程状态，然后就可以再次恢复这个副本协程。
+
 ### 协程建造者
 
 挂起函数不能够从常规函数中调用，所以标准库提供了用于在常规非挂起范围中开启协程的函数。这是简单的*协程建造者* `launch` 的实现：
@@ -293,11 +295,11 @@ fun <R, T> (suspend  R.() -> T).startCoroutine(receiver: R, completion: Continua
 
 ### 协程上下文
 
-协程 context 是一个可以附加到协程中的一组持久的用户定义对象。它可以包括负责协程线程策略的对象，日志，协程执行的安全性和事务方面，协程的标识和名称等等。这里是协程和 context 的简单心智模型 *(喵喵喵?)* 。把协程看作一个轻量线程。在这种情况下，协程 context 仅仅像一个 thread-local 变量的 set。不同之处在于 thread-local 是可变的，协程 context 是不可变的。但对于协程这并不是一个严重的限制，因为他们是如此轻量以至于当 context 改变时可以很容易地开一个新的协程。
+协程 context 是一组可以附加到协程中的持久化用户定义对象。它可以包括负责协程线程策略的对象，日志，协程执行的安全性和事务方面，协程的标识和名称等等。下面是协程及其上下文的简单认识模型。把协程看作一个轻量线程。在这种情况下，协程上下文就像是一堆线程局部化变量。不同之处在线程局部化变量是可变的，协程上下文是不可变的，但对于协程这并不是一个严重的限制，因为他们是如此轻量以至于当需要改变上下文时可以很容易地开一个新的协程。
 
-标准库没有包含 context 的任何具体实现，但拥有接口和抽象类。这样，所有这些方面可以以可组合的方式在库中定义，因此来自不同库的各个方面可以和平共存为同一个 context。
+标准库没有包含上下文的任何具体实现，但拥有接口和抽象类，以便以可组合的方式在库中定义所有这些方面，因此来自不同库的各个方面可以和平共存在同一个上下文中。
 
-从概念上讲，协程 context 是一组元素的索引，其中每个元素有唯一的键。它是一个 set 和 map 的混合。它的元素有像在 map 中的键，但它的键直接与元素关联，更像在一个 set 中。标准库定义了  `CoroutineContext` 的最小接口：
+从概念上讲，协程上下文是一组元素的索引集，其中每个元素有唯一的键。它是集合和映射的混合体。它的元素有像在映射中的那样的键，但它的键直接与元素关联，更像在集合中。标准库定义了  `CoroutineContext` 的最小接口（位于 `kotlinx.coroutines` 包）：
 
 ```kotlin
 interface CoroutineContext {
@@ -314,20 +316,20 @@ interface CoroutineContext {
 }
 ```
 
- `CoroutineContext`  本身有四种可用的核心操作：
+ `CoroutineContext`  本身支持四种核心操作：
 
-* 操作符 `get` 提供对给定键元素类型安全的访问，可以使用 `[..]` 符号。对于可以这样做的原因解释请见 [Kotlin 操作符重载](https://kotlinlang.org/docs/reference/operator-overloading.html)。
+* 操作符 `get` 支持通过给定键类型安全地访问元素。可以使用 `[..]` 写法，解释见 [Kotlin 操作符重载](https://kotlinlang.org/docs/reference/operator-overloading.html)。
 * 函数 `fold` 类似于标准库中 [`Collection.fold`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/fold.html) 扩展函数，提供迭代 context 中所有元素的方法。
-* 操作符 `plus` 类似于标准库的 [`Set.plus`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/plus.html) 扩展函数，返回两个 context 的组合, 右边的元素加上替换左侧的相同键的元素。 *(喵喵喵?)*
+* 操作符 `plus` 类似于标准库的 [`Set.plus`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/plus.html) 扩展函数，返回两个 context 的组合, 同时加号右边的元素会替换掉加号左边具有相同键的元素。
 * 函数 `minueKey` 返回不包含指定键的 context。
 
-协程 context 的一个 `Element` 就是它自己。它是仅具有此元素的单个 context。 *(喵喵喵?)*
+协程上下文的一个 [`Element`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-coroutine-context/-element/index.html) 就是上下文本身。那是仅有这一个元素的独立上下文结构。这样就可以通过获取库定义的协程上下文元素并使用 `+` 连接它们，来创建一个复合上下文。举个例子，如果一个库定义的 `auth` 元素带着用户授权信息，其他库定义的 `threadPool` 对象带着一些协程执行信息，你就可以使用[协程建造者]() `launch{}` 建造使用组合上下文的 `launch(auth + CommonPool){...}` 调用。
 
-这样就可以通过协程 context 元素的库定义，使用 `+` 连接它们来创建一个复合 context。举个例子，如果一个库定义 `auth` 元素带着用户授权信息，一些其他的库定义 `CommonPool` 对象带着一些协程执行信息，你就可以使用协程建造者 `launch{}` 并且使用组合 context `launch(auth + CommonPool){...}` 调用。
+> 注意： [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 提供了几个上下文元素，包括用于在一个共享后台线程池中调度协程的 `Dispatchers.Default`。
 
-> 注意： [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 提供了几个 context 元素，包括将协程执行调度在一个共享后台线程池中的 `CommonPool`。
+标准库提供 [`EmptyCoroutineContext`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-empty-coroutine-context/index.html) —— 一个不包括任何元素的（空的） `CoroutineContext` 实例。
 
-所有库定义的 context 元素应该继承标准库提供的  `AbstractCoroutineContextElement` 类。对于库定义的 context 元素，建议使用一下样式。下面的这个例子显示了一个设想的授权 context 元素，它储存了当前用户名：
+所有第三方协程元素应该继承标准库的 [`AbstractCoroutineContextElement`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-abstract-coroutine-context-element/index.html) 类（位于 `kotlinx.coroutines` 包）。要在库中定义上下文元素，建议使用以下样式。下面的这个例子显示了一个假想的储存当前用户名的授权上下文元素：
 
 ```kotlin
 class AuthUser(val name: String) : AbstractCoroutineContextElement(AuthUser) {
@@ -335,14 +337,18 @@ class AuthUser(val name: String) : AbstractCoroutineContextElement(AuthUser) {
 }
 ```
 
-将 context 的 `Key` 定义为相应元素类的伴生对象能够流畅访问 context 中的相应元素。这是一个设想的挂起函数实现，它需要检查当前用户名：
+> 可以在这里找到[示例](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/context/auth.kt)。
+
+将上下文的 `Key` 定义为相应元素类的伴生对象能够流畅访问上下文中的相应元素。这是一个假想的的挂起函数实现，它需要检查当前用户名：
 
 ```kotlin
-suspend fun secureAwait(): Unit = suspendCoroutine { cont ->
-    val currentUser = cont.context[AuthUser]?.name
-    // do something user-specific
+suspend fun doSomething() {
+    val currentUser = coroutineContext[AuthUser]?.name ?: throw SecurityException("unauthorized")
+    // 做一些用户指定的事
 }
 ```
+
+它使用了 [`coroutineContext`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/coroutine-context.html) 顶层属性（位于 `kotlinx.coroutines` 包），以在挂起函数中检索当前协程的上下文。
 
 ### Continuation 拦截器
 
