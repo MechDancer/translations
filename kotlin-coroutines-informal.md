@@ -50,9 +50,9 @@ launch {
 
 `aRead()` 和 `aWrite()` 是特别的*挂起函数* —— 它们可以*挂起* 代码执行（这并不意味着阻塞运行他们的线程），然后在调用完成时*恢复*  代码执行。如果我们眯着眼睛去想象所有在 `aRead()` 之后的代码已经被包装成一个 lambda 传给 `aRead()` 作为回调，再对 `aWrite()` 做同样的事情，我们就可以看到和上面相同的代码，只是可读性增加了。
 
-以一种非常通用的方式支持协程是我们的明确目标，所以在这个例子中，`launch{}`、`.aRead()` 和 `.aWrite()` 只是适应协程工作的库函数；`launch` 是*协程建造者* —— 它创建并启动协程；`aRead()` 和 `aWrite()` 作为特别的*挂起函数* 隐式地接受*continuations*（continuations 只是一般的回调）。
+以一种非常通用的方式支持协程是我们的明确目标，所以在这个例子中，`launch{}`、`.aRead()` 和 `.aWrite()` 只是适应协程工作的库函数；`launch` 是*协程建造者* —— 它创建并启动协程；`aRead()` 和 `aWrite()` 作为特别的*挂起函数* 隐式地接受*续体*（[*续体*](https://aisia.moe/2018/02/08/kotlin-coroutine-kepa/) 就是一般的回调）。
 
-> 关于 `launch{}` 的示例代码在 [协程建造者]() 一节，关于 `aRead()` 的示例代码在 [包装性回调]() 一节。
+> 关于 `launch{}` 的示例代码在 [协程建造者](#协程建造者) 一节，关于 `aRead()` 的示例代码在 [包装性回调](#包装性回调) 一节。
 
 注意，显式传入的回调要在循环中异步调用通常非常棘手，但在协程中这不过是稀松平常的小事：
 
@@ -103,7 +103,7 @@ val future = future {
 }
 ```
 
-> 关于 `future{}` 的示例代码在 [创建期货]() 一节，关于 `await()` 的示例代码在 [挂起函数]() 一节。
+> 关于 `future{}` 的示例代码在 [创建期货](#创建期货) 一节，关于 `await()` 的示例代码在 [挂起函数](#挂起函数) 一节。
 
 再一次地，协程对期货的支持减少了缩进级别、逻辑（以及异常处理，这里没有出现）更加自然，而且没有使用专门的关键字（比如 C#、JS 以及其他语言中的 `async` 和 `await`）:`future{}` 和 `await()` 都只是库函数而已。
 
@@ -184,7 +184,7 @@ val seq = sequence {
 
 * *挂起点* —— 协程执行过程中可能会被*挂起* 的位置。从语法上说，一个挂起点是对一个挂起函数的调用，但*实际* 的挂起在挂起函数调用了标准库中的原始挂起函数时发生。
 
-* *continuation* —— 是一个挂起的协程在挂起点时的一个状态。它在概念上代表它在挂起点之后的剩余执行代码。一个例子：
+* *续体* —— 是一个挂起的协程在挂起点时的一个状态。它在概念上代表它在挂起点之后的剩余执行代码。一个例子：
 
   ```kotlin
   sequence {
@@ -193,7 +193,7 @@ val seq = sequence {
   }  
   ```
 
-  在这里，每次调用挂起函数 `yield()`，协程挂起时，*其执行的剩余* 被看作 continuation，所以我们有 10 个 continuation：第一次运行循环后 `i=2` ，挂起；第二次运行循环后 `i=3`，挂起……最后一个打印 "over" 并完成协程。该协程在此创建，但尚未启动，由它的初始 *continuation* 所表示，后者由它整个执行组成，类型为 `Continuation<Unit> ` 。
+  在这里，每次调用挂起函数 `yield()`，协程挂起时，*其执行的剩余* 被看作续体，所以我们有 10 个续体：第一次运行循环后 `i=2` ，挂起；第二次运行循环后 `i=3`，挂起……最后一个打印 "over" 并完成协程。该协程在此创建，但尚未启动，由它的初始*续体* 所表示，后者由它整个执行组成，类型为 `Continuation<Unit> ` 。
 
 如上所述，驱动协程的要求之一是灵活性：我们希望能够支持许多现有的异步 API 和其他用例,，并将硬编码到编译器中的部分最小化。因此，编译器只负责支持挂起函数、挂起 lambda 时和相应的挂起函数类型。标准库中的原始函数很少， 其余的则留给应用程序库。
 
@@ -208,7 +208,7 @@ interface Continuation<in T> {
 }
 ```
 
-context 将在[协程上下文]()一节中详细介绍，表示与协程关联的任意用户定义上下文。`resumeWIth` 函数是一个完结回调，用于报告协程完结时成功（带有值）或失败（带有异常）的结果。
+context 将在[协程上下文](#协程上下文)一节中详细介绍，表示与协程关联的任意用户定义上下文。`resumeWIth` 函数是一个完结回调，用于报告协程完结时成功（带有值）或失败（带有异常）的结果。
 
 为了方便，包里还定义了两个扩展函数：
 
@@ -252,13 +252,13 @@ doSomethingAsync(...).await()
 suspend fun <T> suspendCoroutine(block: (Continuation<T>) -> Unit): T
 ```
 
-当  `suspendCoroutine` 在一个协程中被调用时（它只可能在协程中被调用，因为它是一个挂起函数），它捕获了协程的执行状态到一个 *continuation* 实例，然后将其传给指定的 `block` 作为参数。为了恢复协程的执行，代码块之后需要调用 `continuation.resumeWith()`（直接调用或通过 `continuation.resume()` 或 `continuation.resumeWithException()` 调用）在该线程或其他线程中。*实际* 的协程挂起发生当 `suspendCoroutine` 代码块没有调用 `resumeWith` 就返回时。如果协程在代码块中直接被恢复，协程就不被看作已经暂停又继续执行。
+当  `suspendCoroutine` 在一个协程中被调用时（它只可能在协程中被调用，因为它是一个挂起函数），它捕获了协程的执行状态到一个*续体* 实例，然后将其传给指定的 `block` 作为参数。为了恢复协程的执行，代码块之后需要调用 `continuation.resumeWith()`（直接调用或通过 `continuation.resume()` 或 `continuation.resumeWithException()` 调用）在该线程或其他线程中。*实际* 的协程挂起发生当 `suspendCoroutine` 代码块没有调用 `resumeWith` 就返回时。如果协程在代码块中直接被恢复，协程就不被看作已经暂停又继续执行。
 
 传给 `continuation.resumeWith()` 的值作为调用 `suspendCoroutine` 的结果，进一步成为 `.await()` 的结果。
 
 多次恢复同一个协程是不被允许的，并会产生  `IllegalStateException`。 
 
-> 注意：这正是 Kotlin 协程与像 Scheme 这样的函数式语言中的顶层 delimited continuation 以及 Haskell 中的 continuation 函子的关键区别。我们选择仅支持恢复 continuation 一次，完全是出于实用主义考虑，因为所有这些预期的[用例](https://github.com/Kotlin/KEEP/blob/master/proposals/coroutines.md#use-cases)都不需要多重 continuation。然而，还是可以在另外的库中实现多重 continuation，通过所谓协程本征，就是复制 continuation 中捕获的协程状态，然后就可以再次恢复这个副本协程。
+> 注意：这正是 Kotlin 协程与像 Scheme 这样的函数式语言中的顶层限定续体以及 Haskell 中的续体函子的关键区别。我们选择仅支持续体恢复一次，完全是出于实用主义考虑，因为所有这些预期的[用例](https://github.com/Kotlin/KEEP/blob/master/proposals/coroutines.md#use-cases)都不需要多重续体。然而，还是可以在另外的库中实现多重续体，通过所谓协程本征，就是复制续体中捕获的协程状态，然后就可以再次恢复这个副本协程。
 
 ### 协程建造者
 
@@ -276,13 +276,13 @@ fun launch(context: CoroutineContext = EmptyCoroutineContext, block: suspend () 
 
 > 你可以从[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/run/launch.kt)获取代码。
 
-这个实现使用了 [`Continuation(context) { ... }`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-continuation.html) 函数（来自 `kotlin.coroutines` 包），它提供了一个简写以实现包含其给定的 `context` 值和 `resumeWith` 函数所需的代码块的 `Continuation` 接口。这个 continuation 作为 *completion continuation* 被传给 [`block.startCoroutine(...)`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/start-coroutine.html) 扩展函数（来自 `kotlin.coroutines` 包）。
+这个实现使用了 [`Continuation(context) { ... }`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-continuation.html) 函数（来自 `kotlin.coroutines` 包），它提供了一个简写以实现包含其给定的 `context` 值和 `resumeWith` 函数所需的代码块的 `Continuation` 接口。这个续体作为*完成续体* 被传给 [`block.startCoroutine(...)`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/start-coroutine.html) 扩展函数（来自 `kotlin.coroutines` 包）。
 
-协程在完成中将调用其 *completion continuation*。其 `resumeWith` 函数将在协程因成功或失败达到*完成* 状态时调用。因为 `launch` 是那种“即发即弃”式的协程，它被定义成返回 `Unit` 的挂起函数，实际上是无视了其 `resume` 函数的结果。如果协程异常结束，当前线程的未捕获异常句柄将用于报告这个异常。
+协程在完成中将调用其 *完成续体*。其 `resumeWith` 函数将在协程因成功或失败达到*完成* 状态时调用。因为 `launch` 是那种“即发即弃”式的协程，它被定义成返回 `Unit` 的挂起函数，实际上是无视了其 `resume` 函数的结果。如果协程异常结束，当前线程的未捕获异常句柄将用于报告这个异常。
 
 > 注意：这个简单实现返回了 `Unit` ，没有提供任何协程状态的访问。实际上在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中的实现要更加复杂，因为它返回了一个 `Job` 实例，代表这个协程并且可以被取消。
 
-context 在[协程上下文]()一节中详细介绍。`startCoroutine` 在标准库中作为无参和单参数的挂起函数类型的扩展函数：
+context 在[协程上下文](#协程上下文)一节中详细介绍。`startCoroutine` 在标准库中作为无参和单参数的挂起函数类型的扩展函数：
 
 ```kotlin
 fun <T> (suspend  () -> T).startCoroutine(completion: Continuation<T>)
@@ -291,11 +291,11 @@ fun <R, T> (suspend  R.() -> T).startCoroutine(receiver: R, completion: Continua
 
 `startCoroutine` 创建协程并在当前线程中立刻启动执行（但请参阅下面的备注），直到第一个挂起点时返回。挂起点是协程中某个挂起函数的调用，由相应的挂起函数的代码来定义协程恢复的时间和方式。
 
-> 注意：continuation 拦截器（来源于 context）在后文中会提到，它能够将协程的执行，*包括* 它的初始 continuation 调度到另一个线程中。
+> 注意：续体拦截器（来自上下文）在[后文](#续体拦截器)中会提到，它能够将协程的执行，*包括* 它的初始续体调度到另一个线程中。
 
 ### 协程上下文
 
-协程 context 是一组可以附加到协程中的持久化用户定义对象。它可以包括负责协程线程策略的对象，日志，协程执行的安全性和事务方面，协程的标识和名称等等。下面是协程及其上下文的简单认识模型。把协程看作一个轻量线程。在这种情况下，协程上下文就像是一堆线程局部化变量。不同之处在线程局部化变量是可变的，协程上下文是不可变的，但对于协程这并不是一个严重的限制，因为他们是如此轻量以至于当需要改变上下文时可以很容易地开一个新的协程。
+协程上下文是一组可以附加到协程中的持久化用户定义对象。它可以包括负责协程线程策略的对象，日志，协程执行的安全性和事务方面，协程的标识和名称等等。下面是协程及其上下文的简单认识模型。把协程看作一个轻量线程。在这种情况下，协程上下文就像是一堆线程局部化变量。不同之处在线程局部化变量是可变的，协程上下文是不可变的，但对于协程这并不是一个严重的限制，因为他们是如此轻量以至于当需要改变上下文时可以很容易地开一个新的协程。
 
 标准库没有包含上下文的任何具体实现，但拥有接口和抽象类，以便以可组合的方式在库中定义所有这些方面，因此来自不同库的各个方面可以和平共存在同一个上下文中。
 
@@ -319,9 +319,9 @@ interface CoroutineContext {
  `CoroutineContext`  本身支持四种核心操作：
 
 * 操作符 `get` 支持通过给定键类型安全地访问元素。可以使用 `[..]` 写法，解释见 [Kotlin 操作符重载](https://kotlinlang.org/docs/reference/operator-overloading.html)。
-* 函数 `fold` 类似于标准库中 [`Collection.fold`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/fold.html) 扩展函数，提供迭代 context 中所有元素的方法。
-* 操作符 `plus` 类似于标准库的 [`Set.plus`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/plus.html) 扩展函数，返回两个 context 的组合, 同时加号右边的元素会替换掉加号左边具有相同键的元素。
-* 函数 `minueKey` 返回不包含指定键的 context。
+* 函数 `fold` 类似于标准库中 [`Collection.fold`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/fold.html) 扩展函数，提供迭代上下文中所有元素的方法。
+* 操作符 `plus` 类似于标准库的 [`Set.plus`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/plus.html) 扩展函数，返回两个上下文的组合, 同时加号右边的元素会替换掉加号左边具有相同键的元素。
+* 函数 `minueKey` 返回不包含指定键的上下文。
 
 协程上下文的一个 [`Element`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-coroutine-context/-element/index.html) 就是上下文本身。那是仅有这一个元素的独立上下文结构。这样就可以通过获取库定义的协程上下文元素并使用 `+` 连接它们，来创建一个复合上下文。举个例子，如果一个库定义的 `auth` 元素带着用户授权信息，其他库定义的 `threadPool` 对象带着一些协程执行信息，你就可以使用[协程建造者]() `launch{}` 建造使用组合上下文的 `launch(auth + CommonPool){...}` 调用。
 
@@ -350,7 +350,7 @@ suspend fun doSomething() {
 
 它使用了 [`coroutineContext`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/coroutine-context.html) 顶层属性（位于 `kotlinx.coroutines` 包），以在挂起函数中检索当前协程的上下文。
 
-### Continuation 拦截器
+### 续体拦截器
 
 让我们回想一下 [异步 UI](x) 用例。异步 UI 应用程序必须保证协程程序体始终在 UI 线程中执行，尽管各种挂起函数在任意线程中回复协程执行。这是使用 *Continuation 拦截器*  完成的。首先，我们要充分了解协程的生命周期。思考一下用了协程建造者 `launch{}` 的代码片段：
 
