@@ -408,17 +408,19 @@ launch(CommonPool) {
     block2() // 执行 #2
 }
 ```
-协程从 `initialCode` 开始执行，直到第一个挂起点。在挂起点时，协程 *挂起。*一段时间后按照相应挂起函数的定义，协程恢复执行 `block1`，接着再次挂起，在 *完成* 后恢复执行 `block2`。Continuation 拦截器可以拦截和包装与 `initialCode` ,`block1`, 和`block2` 执行相对应的 continuation，使其恢复到之后的挂起点。
+协程从 `initialCode` 开始执行，直到第一个挂起点。在挂起点时，协程*挂起*，一段时间后按照相应挂起函数的定义，协程*恢复* 并执行 `block1`，接着再次挂起又恢复后执行 `block2`，在此之后协程*完毕* 了。
 
-协程的 initial code 被视为 *initial continuation* 的 resumption。标准库提供了以下接口：
+续体拦截器可以拦截和包装与 `initialCode`，`block1` 和 `block2` 执行相对应的、从它们恢复的位置到下一个挂起点之间的续体。协程的初始化代码被视作是由协程的*初始续体* 恢复得来。标准库提供了 [`ContinuationInterceptor`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-continuation-interceptor/index.html) 接口（位于 `kotlinx.coroutines` 包）：
 
 ```kotlin
 interface ContinuationInterceptor : CoroutineContext.Element {
     companion object Key : CoroutineContext.Key<ContinuationInterceptor>
     fun <T> interceptContinuation(continuation: Continuation<T>): Continuation<T>
+    fun releaseInterceptedContinuation(continuation: Continuation<*>)
 }
 ```
- `interceptContinuation` 包装了协程的 continuation。每当协程被挂起时，协程框架用下行代码包装实际后续恢复的 `continuation`：
+ 
+ `interceptContinuation` 函数包装了协程的续体。每当协程被挂起时，协程框架用下行代码包装实际后续恢复的 `continuation`：
 
 ```kotlin
 val facade = continuation.context[ContinuationInterceptor]?.interceptContinuation(continuation) ?: continuation
