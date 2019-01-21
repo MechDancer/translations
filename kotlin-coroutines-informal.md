@@ -156,7 +156,7 @@ val seq = sequence {
 } 
 ```
 
-> 关于 `sequence{}` 和 `yield()` 的示例代码在[受限挂起]()一节。
+> 关于 `sequence{}` 和 `yield()` 的示例代码在[限定挂起](#限定挂起)一节。
 
 注意，这种方法还允许把 `yieldAll(sequence)` 表示为库函数（像 `sequence{}` 和 `yield()` 那样），这能简化延时序列的连接操作，并允许高效的实现。
 
@@ -419,32 +419,29 @@ interface ContinuationInterceptor : CoroutineContext.Element {
     fun releaseInterceptedContinuation(continuation: Continuation<*>)
 }
 ```
- 
+
  `interceptContinuation` 函数包装了协程的续体。每当协程被挂起时，协程框架用下行代码包装实际后续恢复的 `continuation`：
 
 ```kotlin
 val facade = continuation.context[ContinuationInterceptor]?.interceptContinuation(continuation) ?: continuation
 ```
-协程框架为每个实际的 continuation 实例缓存结果 facade。有关详细信息, 请参阅实现细节部分。
+协程框架为每个实际的续体实例实例缓存拦截过的续体，并且在不再需要时调用 `releaseInterceptedContinuation(intercepted)`。想了解更多细节请参阅[实现细节](#实现细节)部分。
 
-> 注意，像 `await` 这样的挂起函数可能会或可能不会实际挂起协程的执行。举个例子，看看在 [挂起函数](#挂起函数) 部分提到 `await` 的实现，当 future 已经完成时（在这种情况下 `resume` 会立刻被调用，协程的执行没有被挂起）就不会使协程真正挂起。只有当协程执行真正被挂起时，一个 continuation 才会被拦截，即当 `suspendCoroutine` 函数体返回但并没有调用 `resume`。
+> 注意，像 `await` 这样的挂起函数实际上不一定会挂起协程的执行。比如[挂起函数](#挂起函数)一节所展现的 `await` 实现在期货已经完成的情况下就不会使协程真正挂起（在这种情况下 `resume` 会立刻被调用，协程的执行没有被挂起）。只有协程执行中真正被挂起时，续体才会被拦截，也就是调用 `resume` 之前 `suspendCoroutine` 函数就返回了的时候。
 
-让我们来看看一个用于 `Swing` 拦截器的具体实例代码，它将执行调度在 Swing UI 事件调度线程上。我们从一个包装类 `SwingContinuation` 开始，它检查当前线程并且确保 continuation 只在 Swing 事件调度线程中恢复。如果执行已经在 UI 线程中发生， `Swing` 仅仅合适地调用 `cont.resume`，否则它会使用 `SwingUtilities.invokeLater` 将 continuation 的执行调度在 Swing UI 线程上。
+让我们来看看 `Swing` 拦截器的具体示例代码，它将执行调度在 Swing 用户界面事件调度线程上。我们先来定义一个包装类 `SwingContinuation`，它调用 `SwingUtilities.invokeLater`，把续体调度到 Swing 事件调度线程：
 
 ```kotlin
-private class SwingContinuation<T>(val cont: Continuation<T>) : Continuation<T> by cont {
-    override fun resume(value: T) {
-        if (SwingUtilities.isEventDispatchThread()) cont.resume(value)
-        else SwingUtilities.invokeLater { cont.resume(value) }
-    }
-
-    override fun resumeWithException(exception: Throwable) {
-        if (SwingUtilities.isEventDispatchThread()) cont.resumeWithException(exception)
-        else SwingUtilities.invokeLater { cont.resumeWithException(exception) }
+private class SwingContinuation<T>(val cont: Continuation<T>) : Continuation<T> {
+    override val context: CoroutineContext = cont.context
+    
+    override fun resumeWith(result: Result<T>) {
+        SwingUtilities.invokeLater { cont.resumeWith(result) }
     }
 }
 ```
-接着定义了一个 `Swing` 对象作为相应的 context 元素，并实现了 `ContinuationInterceptor` 接口：
+
+然后定义 `Swing` 对象并实现 `ContinuationInterceptor` 接口，用作对应的上下文元素：
 
 ```kotlin
 object Swing : AbstractCoroutineContextElement(ContinuationInterceptor), ContinuationInterceptor {
@@ -452,84 +449,85 @@ object Swing : AbstractCoroutineContextElement(ContinuationInterceptor), Continu
         SwingContinuation(continuation)
 }
 ```
-
-> 你可以从 [这里](https://github.com/Kotlin/kotlin-coroutines/blob/master/examples/context/swing.kt) 获得这部分代码。
+> 你可以从[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/context/swing.kt)获得这部分代码。注意：`Swing` 对象在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中的实际实现还支持了协程调试功能，提供及显示用运行协程的线程表示的当前协程的标识符。
 >
-> 注意：`Swing` 对象在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中实际实现还支持了 debug 功能，这提供并显示了协程的标识和当前运行协程的线程名。
 
-现在，可以使用协程建造者 `launch{}` 带着 `Swing` 参数来执行一个完全运行在 Swing 事件调度线程中的协程：
+现在，可以用带有 `Swing` 参数的[协程建造者](#协程建造者) `launch{}` 来执行完全运行在 Swing 事件调度线程中的协程：
 
 ```kotlin
 launch(Swing) {
-   // code in here can suspend, but will always resume in Swing EDT
+  // 这里的代码可以挂起，但总是恢复在 Swing 事件调度线程上
 }
 ```
 
-### Restricted 的挂起
+> 在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中，Swing上下文的实际实现更加复杂，因为它还要集成库的时间和调试工具。
 
+### 限定挂起
 
-
-## 更多例子
-
-
-
-### 包装回调
-
-
-
-### 建造 futures
-
-
-
-### 非阻塞睡眠
-
-协程不应使用 [`Thread.sleep`](https://docs.oracle.com/javase/8/docs/api/java/lang/Thread.html#sleep-long-)，因为它阻塞了线程。但是，通过 Java 的 [`ScheduledThreadPoolExecutor`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ScheduledThreadPoolExecutor.html) 实现挂起的非阻塞 `delay` 函数是非常简单的。
+为例实现[生成器](#生成器)用例中的 `sequence{}` 和 `yield()`，需要另一类协程建造者和挂起函数。这是协程建造者 `sequence{}` 的示例代码：
 
 ```kotlin
-private val executor = Executors.newSingleThreadScheduledExecutor {
-    Thread(it, "scheduler").apply { isDaemon = true }
-}
-
-suspend fun delay(time: Long, unit: TimeUnit = TimeUnit.MILLISECONDS): Unit = suspendCoroutine { cont ->
-    executor.schedule({ cont.resume(Unit) }, time, unit)
+fun <T> sequence(block: suspend SequenceScope<T>.() -> Unit): Sequence<T> = Sequence {
+    SequenceCoroutine<T>().apply {
+        nextStep = block.createCoroutine(receiver = this, completion = this)
+    }
 }
 ```
 
-> 你可以从 [这里](https://github.com/Kotlin/kotlin-coroutines/blob/master/examples/delay/delay.kt) 获取到这段代码。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines)  同样提供了 `delay` 函数。
+它使用了标准库中类似于 `startCoroutine`（解释见[协程建造者](#协程建造者)一节）的另一个原语 [`createCoroutine`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/create-coroutine.html)。不同点在于它*创建* 一个协程，但并*不* 启动协程，而是返回表示协程的*初始续体* 的 `Continuation<Unit>` 引用：
 
+```kotlin
+fun <T> (suspend () -> T).createCoroutine(completion: Continuation<T>): Continuation<Unit>
+fun <R, T> (suspend R.() -> T).createCoroutine(receiver: R, completion: Continuation<T>): Continuation<Unit>
+```
 
+另一个不同点是传递给建造者的*挂起 λ* `block` 是具有 `SequenceScope<T>` 接收者的[扩展 λ](https://kotlinlang.org/docs/reference/lambdas.html#function-literals-with-receiver)。`SequenceScope<T>` 接口提供了生成器代码块的作用域，其在库中定义如下：
 
+```kotlin
+interface SequenceScope<in T> {
+    suspend fun yield(value: T)
+}
+```
 
+为了避免生成多个对象，`sequence{}` 实现中定义了 `SequenceCoroutine<T>` 类，它同时实现了 `SequenceScope<T>` 和 `Continuation<Unit>`，因此它可以同时作为 `createCoroutine` 的 `receiver` 参数和 `completion` 续体参数。下面展示了 `SequenceCoroutine<T>` 的一种简单实现：
 
-### 合作单线程多任务处理
+```kotlin
+private class SequenceCoroutine<T>: AbstractIterator<T>(), SequenceScope<T>, Continuation<Unit> {
+    lateinit var nextStep: Continuation<Unit>
 
+    // 实现抽象迭代器
+    override fun computeNext() { nextStep.resume(Unit) }
 
+    // 实现续体
+    override val context: CoroutineContext get() = EmptyCoroutineContext
 
-## 异步 Sequences
+    override fun resumeWith(result: Result<Unit>) {
+        result.getOrThrow() // 错误则退出
+        done()
+    }
 
+    // 实现生成器
+    override suspend fun yield(value: T) {
+        setNext(value)
+        return suspendCoroutine { cont -> nextStep = cont }
+    }
+}
+```
 
+> 你可以在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/sequence/sequence.kt)看到代码。注意，标准库提供了 [`sequence`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.sequences/sequence.html) 函数开箱即用的优化实现，而且还支持 [`yieldAll`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.sequences/-sequence-scope/yield-all.html) 函数。
 
-### Channels
+> 实际使用的 `sequence` 代码使用了实验性的 `BuilderInference` 特性以支持[生成器](#生成器)一节中使用的不用显式指定序列类型参数 `T` 的 `fibonacci` 声明。其类型是从传给 `yield` 的参数类型推断得来的。
 
+`yield` 的实现中使用了 `suspendCoroutine` [挂起函数](#挂起函数)来挂起协程并捕获其续体。续体保存在 `nextStep` 中，并在调用 `computeNext` 时恢复。
 
+然而，之前展示的 `sequence{}` 和 `yield()`，其续体并不能被任意的挂起函数在各自的作用域里捕获。它们*同步地* 工作。它们需要对如何捕获续体、在何处存储续体和何时恢复续体需要绝对的控制。它们形成了*限定挂起域* 。对挂起的限定作用由作用域类或接口上的 `RestrictSuspension` 注解提供，上面的例子里这个作用域接口是 `SequenceScope`：
 
-### Mutexes
-
-
-
-## 进阶话题
-
-
-
-### 资源管理和 GC
-
-
-
-### 并发和线程
-
-
-
-## 异步编程样式
+```kotlin
+@RestrictsSuspension
+interface SequenceScope<in T> {
+    suspend fun yield(value: T)
+}
+```
 
 
 
@@ -569,9 +567,9 @@ c(z)
 
 这个代码块有三个状态：
 
-* 初始化（在挂起点之前）
-* 在第一个挂起点之后
-* 在第二个挂起点之后
+- 初始化（在挂起点之前）
+- 在第一个挂起点之后
+- 在第二个挂起点之后
 
 每个状态都是这个代码块 continuation 的一个入口点（初始化 continuation 从第一行开始）。
 
@@ -669,3 +667,31 @@ class <anonymous_for_state_machine> extends CoroutineImpl<...> implements Contin
 
 
 ### 协程内部
+
+## 更多例子
+
+
+
+### 包装回调
+
+
+
+### 建造 futures
+
+
+
+### 非阻塞睡眠
+
+协程不应使用 [`Thread.sleep`](https://docs.oracle.com/javase/8/docs/api/java/lang/Thread.html#sleep-long-)，因为它阻塞了线程。但是，通过 Java 的 [`ScheduledThreadPoolExecutor`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ScheduledThreadPoolExecutor.html) 实现挂起的非阻塞 `delay` 函数是非常简单的。
+
+```kotlin
+private val executor = Executors.newSingleThreadScheduledExecutor {
+    Thread(it, "scheduler").apply { isDaemon = true }
+}
+
+suspend fun delay(time: Long, unit: TimeUnit = TimeUnit.MILLISECONDS): Unit = suspendCoroutine { cont ->
+    executor.schedule({ cont.resume(Unit) }, time, unit)
+}
+```
+
+> 你可以从 [这里](https://github.com/Kotlin/kotlin-coroutines/blob/master/examples/delay/delay.kt) 获取到这段代码。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines)  同样提供了 `delay` 函数。
