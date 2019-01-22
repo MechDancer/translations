@@ -529,7 +529,11 @@ interface SequenceScope<in T> {
 }
 ```
 
+这个注解对能用在 `sequence{}` 域或其他类似的同步协程建造者中的挂起函数有一定的限制。那些扩展*限定性挂起域* 类或接口（以 `@RestrictsSuspension` 标记）的挂起 λ 或函数称作*限定性挂起函数*。限定性挂起函数只接受来自同一个限定挂起域实例的的成员或扩展挂起函数作为参数。
 
+回到这个例子，这意味着 `SequenceScope` 范围内 λ 的扩展不能调用 `suspendCOntinuation` 或其他通用挂起函数。要挂起 `sequence` 协程的执行，最终必须通过调用 `SequenceScope.yield`。`yield` 本身被实现为 `SequenceScope` 实现的成员函数，对其内部不作任何限制（只有*扩展* 挂起 λ  和函数是限定的）。
+
+对于像 `sequence` 这样的限定性协程建造者，支持任意上下文是没有意义的，因为其作用类或接口（比如这个例子里的 `SequenceScope`）已经占用了上下文能提供的服务，因此限定性协程只能使用 `EmptyCoroutineContext` 作为上下文，`SequenceCouroutine` 的取值器实现也会返回这个。尝试创建上下文不是 `EmptyCoroutineSContext` 的限定性协程会引发 `IllegalArgumentException`。
 
 ## 实现细节
 
