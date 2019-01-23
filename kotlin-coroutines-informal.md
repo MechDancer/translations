@@ -537,29 +537,31 @@ interface SequenceScope<in T> {
 
 ## 实现细节
 
-本节提供了协程实现细节的一小部分。它们隐藏在 [协程概述](#协程概述) 部分解释的构造代码块背后，内部类和代码的生成策略在不打破公共 API 和 ABI 的约定下是会改变的。
+本节展现了协程实现细节的冰山一角。它们隐藏在[协程概述](#协程概述)部分解释的构造代码块背后，内部类和代码的生成策略在不打破公共 API 和 ABI 约定 的情况下随时可能改变。
 
-### Continuation 传递样式
+### 续体传递样式 CPS
 
-挂起函数通过 Continuation-Passing-Style (CPS) 实现。每个挂起函数和挂起 lambda 都有一个附加的 `Continuation` 参数， continuation 隐式地在调用时传递。回想一下，[`await` 挂起函数](#挂起函数) 的定义是这样的：
+挂起函数通过 Continuation-Passing-Style (CPS) 实现。每个挂起函数和挂起 λ 都会在调用时隐式地传入一个附加的 `Continuation` 参数。回想一下，[`await` 挂起函数](#挂起函数) 的声明是这样的：
 
 ```kotlin
 suspend fun <T> CompletableFuture<T>.await(): T
 ```
 
-然而在 *CPS 变换* 之后，它的实际实现具有具有以下签名：
+然而在*CPS 变换*之后，它的实际实现具有具有以下签名：
 
 ```kotlin
 fun <T> CompletableFuture<T>.await(continuation: Continuation<T>): Any?
 ```
 
-它的返回类型 `T` 移到了附加参数的 continuation 上。实现中的返回值 `Any?` 是用于代表挂起函数的动作。当挂起函数 *挂起* 协程时，函数返回一个特别的标识值 `COROUTINE_SUSPENDED`。当一个挂起函数没有挂起协程，协程继续执行时，它返回函数结果或者直接抛出异常。这样以来，`await` 函数实现中的返回值 `Any?` 实际上是 `T` 和  `COROUTINE_SUSPENDED` 的联合类型，这并不能在 Kotlin 的类型系统中表示出来。挂起函数的实现实际上不允许调用其栈帧中的 continuation，因为这可能导致长时间运行的协程栈溢出。标准库中的 `suspendCoroutine` 通过追踪 continuation 的调用保证了挂起函数与实际实现一致性的约定，无论 continuation 在何时怎样调用，对应用开发者隐藏它的复杂性。
+其返回类型 `T` 移到了附加续体参数的类型参数位置。实现中的返回值 `Any?` 是用于代表挂起函数的动作。当挂起函数*挂起* 协程时，函数返回一个特别的标识值 `COROUTINE_SUSPENDED`（更多细节访问[`协程本征`](#协程本征)一节）。当一个挂起函数没有挂起协程，协程继续执行时，它直接返回一个结果或者抛出一个异常。这样以来，`await` 函数实现中的返回值 `Any?` 实际上是 `T` 和  `COROUTINE_SUSPENDED` 的联合类型，这并不能在 Kotlin 的类型系统中表示出来。
+
+挂起函数的实现实际上不允许调用其栈帧中的续体，因为这可能导致长时间运行的协程栈溢出。标准库中的 `suspendCoroutine` 函数通过追踪续体的调用保证了无论续体在何时怎样调用，挂起函数与实际实现具有一致性的约定，得以对应用开发者隐藏它的复杂性。
 
 ### 状态机
 
-有效的实现协程是非常重要的，即尽可能少地创建类和对象。许多语言通过 *状态机* 去实现，Kotlin 也是这样做的。在这种情况下，此方法会导致编译器只为挂起 lambda 创建一个类，在其中可能有任意数量的挂起点。
+协程实现的性能是非常重要的，这需要尽可能少地创建类和对象。许多语言通过*状态机* 实现，Kotlin 也是这样做的。对于 Kotlin，使用此方法让编译器为每个挂起 λ 创建一个其中可能有任意数量挂起点的类。
 
-主要思想：一个将挂起函数编译为状态机，它的每个状态对应着挂起点。举个例子，我们看看具有两个挂起点的挂起代码块：
+主要思想：挂起函数编译为状态机，其状态对应着挂起点。示例：弄一个有两个挂起点的挂起代码块：
 
 ```kotlin
 val a = a()
@@ -575,51 +577,51 @@ c(z)
 - 在第一个挂起点之后
 - 在第二个挂起点之后
 
-每个状态都是这个代码块 continuation 的一个入口点（初始化 continuation 从第一行开始）。
+每个状态都是这个代码块续体的一个入口点（初始续体从第一行开始）。
 
-代码会被编译为具有实现状态机方法的匿名类，一个持有状态机当前状态的字段，状态之间共享的局部变量字段，也可能有协程闭包的字段，但在这种情况下它是空的。下面的伪 Java 代码块使用 CPS 调用挂起函数 `await`：
+代码会被编译为一个匿名类，它的一个方法实现了这个状态机、一个字段持有状态机当前状态，状态之间共享的局部变量字段<u>（也可能有协程闭包的字段，但在这种情况下它是空的）？</u>。这是上文代码块通过续体传递样式调用挂起函数 `await` 的 Java 伪代码：
 
 ```java
-class <anonymous_for_state_machine> extends CoroutineImpl<...> implements Continuation<Object> {
-    // 状态机的当前状态
+lass <anonymous_for_state_machine> extends SuspendLambda<...> {
+    // 状态机当前状态
     int label = 0
     
     // 协程的局部变量
     A a = null
     Y y = null
     
-    void resume(Object data) {
+    void resumeWith(Object result) {
         if (label == 0) goto L0
         if (label == 1) goto L1
         if (label == 2) goto L2
         else throw IllegalStateException()
         
       L0:
-        // 在此调用时, data 应为 null
+        // 这次调用，result应该为空
         a = a()
         label = 1
-        data = foo(a).await(this) // 'this' 作为 continuation 传递
-        if (data == COROUTINE_SUSPENDED) return // 如果 await 执行挂起，则返回
+        result = foo(a).await(this) // 'this'作为续体传递
+        if (result == COROUTINE_SUSPENDED) return // 如果await挂起了执行则返回
       L1:
-        // 外部代码已经恢复协程，传递 .await() 的结果作为 data
-        y = (Y) data
+        // 外部代码传入.await()的结果恢复协程 
+        y = (Y) result
         b()
         label = 2
-        data = bar(a, y).await(this) // 'this' 作为 continuation 传递
-        if (data == COROUTINE_SUSPENDED) return // 如果 await 执行挂起，则返回
+        result = bar(a, y).await(this) // 'this'作为续体传递
+        if (result == COROUTINE_SUSPENDED) return // 如果await挂起了执行则返回
       L2:
-        // 外部代码已经恢复协程，传递 .await() 的结果作为 data 
-        Z z = (Z) data
+        // 外部代码传入.await()的结果恢复协程
+        Z z = (Z) result
         c(z)
-        label = -1 // 不允许执行其他步骤
+        label = -1 // 没有其他步骤了
         return
     }          
 }    
 ```
 
-请注意，这里有 `go` 运算符和标签，因为该例子描述了字节码中发生的情况，而不是源代码内容。
+请注意，这里有 `goto` 运算符，还有标签，因为该例子描述的变化发生在字节码中而不是源码中。
 
-现在，当协程开始时，我们调用了它的 `resume()` —— `label` 是 `0`，然后我们跳去 `L0`，接着我们做一些工作，将 `label` 设为下一个状态 —— `1`，调用 `.await()`，如果协程执行挂起，则返回。当我们想继续执行时，我们再次调用 `resume()`，现在它继续到了 `L1`，做一些工作，将状态设为 `2`，调用 `.await()`，同样在挂起时返回。下一次它从 `L3` 继续，将状态设为 `-1`，这意味着 "结束了，没有更多工作要做了"。
+现在，当协程开始时，我们调用了它的 `resumeWith()` —— `label` 是 `0`，然后我们跳去 `L0`，接着我们做一些工作，将 `label` 设为下一个状态 —— `1`，调用 `.await()`，如果协程执行挂起就返回。当我们想继续执行时，我们再次调用 `resumeWith()`，现在它继续到了 `L1`，做一些工作，将状态设为 `2`，调用 `.await()`，同样在挂起时返回。下一次它从 `L3` 继续，将状态设为 `-1`，这意味着 "结束了，没有更多工作要做了"。
 
 循环内的挂起点只生成一个状态，因为循环也通过 `goto` 工作（根据条件）：
 
@@ -633,14 +635,14 @@ while (x < 10) {
 生成为
 
 ```java
-class <anonymous_for_state_machine> extends CoroutineImpl<...> implements Continuation<Object> {
-    // The current state of the state machine
+class <anonymous_for_state_machine> extends SuspendLambda<...> {
+    // 状态机当前状态
     int label = 0
     
-    // local variables of the coroutine
+    // 协程局部变量
     int x
     
-    void resume(Object data) {
+    void resumeWith(Object result) {
         if (label == 0) goto L0
         if (label == 1) goto L1
         else throw IllegalStateException()
@@ -650,39 +652,35 @@ class <anonymous_for_state_machine> extends CoroutineImpl<...> implements Contin
       LOOP:
         if (x > 10) goto END
         label = 1
-        data = nextNumber().await(this) // 'this' is passed as a continuation 
-        if (data == COROUTINE_SUSPENDED) return // return if await had suspended execution
+        result = nextNumber().await(this) // 'this'作为续体传递 
+        if (result == COROUTINE_SUSPENDED) return // 如果await挂起了执行则返回
       L1:
-        // external code has resumed this coroutine passing the result of .await() as data 
-        x += ((Integer) data).intValue()
+        // 外部代码传入.await()的结果恢复协程
+        x += ((Integer) result).intValue()
         label = -1
         goto LOOP
       END:
-        label = -1 // No more steps are allowed
+        label = -1 // 没有其他步骤了
         return 
     }          
 }    
 ```
 
-
-
 ### 编译挂起函数
 
+### 协程本征
 
+## 附录
 
-### 协程内部
+### 资源管理与垃圾收集
 
-## 更多例子
+### 并发和线程
 
-
+### 异步编程风格
 
 ### 包装回调
 
-
-
-### 建造 futures
-
-
+### 构造期货
 
 ### 非阻塞睡眠
 
@@ -699,3 +697,17 @@ suspend fun delay(time: Long, unit: TimeUnit = TimeUnit.MILLISECONDS): Unit = su
 ```
 
 > 你可以从 [这里](https://github.com/Kotlin/kotlin-coroutines/blob/master/examples/delay/delay.kt) 获取到这段代码。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines)  同样提供了 `delay` 函数。
+
+### 协作式单线程多任务
+
+### 异步序列
+
+### 通道
+
+### 互斥
+
+### 从实验性协程移植
+
+### 参考
+
+### 反馈
