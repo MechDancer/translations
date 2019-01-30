@@ -916,6 +916,31 @@ inline suspend fun <T> vx(crossinline callback: (Handler<AsyncResult<T>>) -> Uni
 
 ### 构造期货
 
+定义在[期货](#期货)用例中类似于 `launch{}` 建造者的 `future{}` 建造者可以用于实现任何期货或诺言原语，这在
+
+[协程建造者](#协程建造者)做了一些介绍：
+
+```kotlin
+fun <T> future(context: CoroutineContext = CommonPool, block: suspend () -> T): CompletableFuture<T> =
+        CompletableFutureCoroutine<T>(context).also { block.startCoroutine(completion = it) }
+```
+
+它与 `launch{}` 的第一点不同是它返回 [`CompletableFuture`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletableFuture.html) 的实例，第二点不同是它包含一个默认为 `CommonPool` 的上下文，因此其默认执行在 [`ForkJoinPool.commonPool`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ForkJoinPool.html#commonPool--)，这个默认执行行为类似于 [`CompletableFuture.supplyAsync`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletableFuture.html#supplyAsync-java.util.function.Supplier-) 方法。`CompletableFutureCoroutine` 的基本实现很直白：
+
+```kotlin
+class CompletableFutureCoroutine<T>(override val context: CoroutineContext) : CompletableFuture<T>(), Continuation<T> {
+    override fun resumeWith(result: Result<T>) {
+        result
+            .onSuccess { complete(it) }
+            .onFailure { completeExceptionally(it) }
+    }
+}
+```
+
+> 从[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/future/future.kt)获取代码。[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中实际的实现更高级，因为它要传播对等待结果的期货的取消，以终止协程。
+
+协程完成时调用对应期货的 `complete` 方法向协程报告结果。
+
 ### 非阻塞睡眠
 
 协程不应使用 [`Thread.sleep`](https://docs.oracle.com/javase/8/docs/api/java/lang/Thread.html#sleep-long-)，因为它阻塞了线程。但是，通过 Java 的 [`ScheduledThreadPoolExecutor`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ScheduledThreadPoolExecutor.html) 实现挂起的非阻塞 `delay` 函数是非常简单的。
@@ -932,7 +957,57 @@ suspend fun delay(time: Long, unit: TimeUnit = TimeUnit.MILLISECONDS): Unit = su
 
 > 你可以从 [这里](https://github.com/Kotlin/kotlin-coroutines/blob/master/examples/delay/delay.kt) 获取到这段代码。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines)  同样提供了 `delay` 函数。
 
+注意，这种 `delay` 函数从其单独的“时刻表”线程恢复协程。那些使用[拦截器](https://github.com/Kotlin/KEEP/blob/master/proposals/coroutines.md#continuation-interceptor)的协程，比如 `Swing`，不会在这个线程上执行，因为它们的拦截器在合适的线程上调度它们。没有拦截器的协程会在时刻表线程上调度。所以这对一个示例来说挺方便的，但是算不上有性能。最好能在相应的拦截器中实现原生的睡眠。对于 `Swing` 拦截器，非阻塞睡眠的原生实现应使用专门为此目的设计的 [`Swing 计时器`](https://docs.oracle.com/javase/8/docs/api/javax/swing/Timer.html)：
+
+```kotlin
+suspend fun Swing.delay(millis: Int): Unit = suspendCoroutine { cont ->
+    Timer(millis) { cont.resume(Unit) }.apply {
+        isRepeats = false
+        start()
+    }
+}
+```
+
+> 你可以从 [这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/context/swing-delay.kt) 获取到这段代码。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines)  中的 `delay` 实现注意了拦截器的特异性睡眠机制，并在适当的情况下自动使用上述方法。
+
 ### 协作式单线程多任务
+
+在单线程应用中实现多任务非常方便，因为这样就不必处理并发或者共享可变状态了。JS、Python 还有很多其他语言甚至没有线程，但有协作式多任务原语。
+
+[协程拦截器](https://github.com/Kotlin/KEEP/blob/master/proposals/coroutines.md#coroutine-interceptor)提供了一个简单的工具保证所有协程限制在同一线程上。[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/context/threadContext.kt)的示例代码定义了 `newSingleThreadContext()` 函数，它能创建一个单线程执行的服务并使其适应协程拦截器的需求。
+
+在下面这个单线程的示例中，我们把它和[构造期货](#构造期货)一节中的 `future{}` 协程建造者一起使用，尽管它有两个同时处于活动状态的异步任务。
+
+```kotlin
+fun main(args: Array<String>) {
+    log("启动事件线程")
+    val context = newSingleThreadContext("事件线程")
+    val f = future(context) {
+        log("Hello, world!")
+        val f1 = future(context) {
+            log("f1 睡眠")
+            delay(1000) // 睡眠1秒
+            log("f1 返回 1")
+            1
+        }
+        val f2 = future(context) {
+            log("f2 睡眠")
+            delay(1000) // 睡眠1秒
+            log("f2 返回 2")
+            2
+        }
+        log("等待 f1 和 f2 都完成，只需1秒！")
+        val sum = f1.await() + f2.await()
+        log("和是$sum")
+    }
+    f.get()
+    log("结束")
+}
+```
+
+> 从[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/context/threadContext-example.kt)获取完整示例。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines)  有 `newSingleThreadContext` 开箱即用的实现。
+
+如果你的整个应用都在同一个线程上执行，你可以定义自己的辅助协程建造者，在其中硬编码一个适应你单线程执行机制的上下文。
 
 ### 异步序列
 
