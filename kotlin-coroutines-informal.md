@@ -760,9 +760,9 @@ sequenceOfLines("https://github.com/kotlin/kotlin-coroutines-examples/tree/maste
 
 协程恢复了几次，产生出文件的前三行，然后就被*遗弃* 了。遗弃对于协程本身来说没什么关系，但是对于打开了的文件则不然。[`use` 函数](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.io/use.html)没有机会结束调用并关闭文件。文件会一直开着，直到被垃圾收集器回收，因为 Java 的文件操作有个 `finalizer` 能关闭文件。如果只是个幻灯片或者短时间运行的小工具，这倒也不是什么问题，但是对于那些大型后端系统来说可就是个灾难了，因为它们有几个GB的堆存储，以至于在耗尽内存触发垃圾收集之前文件句柄先溢出了。
 
-这个问题和 Java 里生成行的惰性流的 [`Files.lines`](https://docs.oracle.com/javase/8/docs/api/java/nio/file/Files.html#lines-java.nio.file.Path-) 遇到的问题一样。它返回一个可关闭的 Java 流，但多数流操作不会自动调用对应的 `stream.close` 方法，需要用户自己记着关闭流。
+这个问题和 Java 里生成行的惰性流的 [`Files.lines`](https://docs.oracle.com/javase/8/docs/api/java/nio/file/Files.html#lines-java.nio.file.Path-) 遇到的问题一样。它返回一个可关闭的 Java 流，但多数流操作不会自动调用对应的 `stream.close` 方法，需要用户自己记着关闭流。Kotlin 里也可以定义可关闭序列的生成器，当然也会遇到同一个问题，就是语言没有什么自动机制能保证它们在用完之后关闭。引入一种自动化资源管理的语言机制明显超出了 Kotlin 协程的领域。
 
-Kotlin 里也可以定义可关闭序列的生成器，当然也会遇到同一个问题，就是语言没有什么自动机制能保证它们在用完之后关闭。引入一种自动化资源管理的语言机制明显超出了 Kotlin 协程的领域。然而，通常这个问题不会影响协程的异步用例。异步协程是不会被遗弃的，它会持续运行直到完毕。因此只要协程里的代码能正确地关闭其资源，资源最终就会被关闭。
+然而，通常这个问题不会影响协程的异步用例。异步协程是不会被遗弃的，它会持续运行直到完毕。因此只要协程里的代码能正确地关闭其资源，资源最终就会被关闭。
 
 ### 并发和线程
 
@@ -783,6 +783,72 @@ launch { // 启动协程
 协程在这方面和线程没有什么不同，尽管协程确实更轻。你可以在仅仅几个线程上同时运行几百万个协程。一个运行着的协程总是在某个线程上。但一个*挂起* 了的协程并不占用线程，也没有以任何方式绑定到线程。恢复协程的挂起函数通过在线程上调用 `Continuation.resumeWith` 决定在哪个线程上恢复协程。而协程拦截器可以覆盖这个决定，并将协程的执行分派到不同的线程上。
 
 ### 异步编程风格
+
+异步编程有多种风格。
+
+[异步计算](#异步计算)一节已经讨论了回调函数，这也是协程风格通常用来替换的最不方便的一种风格。任何回调风格的应用程序接口都可以用对应的挂起函数包装，见[这里](https://github.com/Kotlin/KEEP/blob/master/proposals/coroutines.md#wrapping-callbacks)。
+
+我们来回顾一下。假设你现在有一个带有以下签名的阻塞 `sendMail` 函数：
+
+```kotlin
+fun sendEmail(emailArgs: EmailArgs): EmailResult
+```
+
+它在运行时会阻塞执行线程很长的时间。
+
+要使其不阻塞，可以使用错误先行的 [node.js 回调约定](https://www.tutorialspoint.com/nodejs/nodejs_callbacks_concept.htm)，以回调样式表示其非阻塞版本，签名如下：
+
+```kotlin
+fun sendEmail(emailArgs: EmailArgs, callback: (Throwable?, EmailResult?) -> Unit)
+```
+
+但是，协程支持其他风格的异步非阻塞编程。其中之一是内置于许多流行语言中的 async/await 风格。在Kotlin中，可以通过引入 `future{}` 和 `.await()` 库函数来复制这种风格，就像[期货](#期货)用例一节所示。
+
+这种风格主张从函数返回对未来对象的某种约定，而不是传入回调函数作为参数。在这种异步风格中，`sendEmail` 的签名看起来是这样：
+
+```kotlin
+fun sendEmailAsync(emailArgs: EmailArgs): Future<EmailResult>
+```
+
+从风格上讲，最好给这方法的名字加上一个 Async 后缀，因为它们的参数和阻塞版本没什么不同，因而很容易忘记其操作异步的本质。函数 `sendEmailAsync` 启动一个*并发* 异步的操作，可能带来并发的所有陷阱。然而，鼓励这种风格的编程语言通常也提供某种 `await` 原语，在需要的时候把操作重新变回顺序的。
+
+Kotlin 的*原生* 编程风格基于挂起函数。在这种风格下，`sendEmail` 的签名看起来比较自然，不破坏其参数或返回类型，但带有附加的 `suspend` 修饰符：
+
+```kotlin
+suspend fun sendEmail(emailArgs: EmailArgs): EmailResult
+```
+
+我们已经发现，异步和挂起风格可以通过原语很容易地相互转换。例如，`sendEmailAsync` 可以用挂起版本的 `sendEmail` 和[期货建造者](#https://github.com/Kotlin/KEEP/blob/master/proposals/coroutines.md#building-futures)轻易地实现：
+
+```kotlin
+fun sendEmailAsync(emailArgs: EmailArgs): Future<EmailResult> = future {
+    sendEmail(emailArgs)
+}
+```
+
+因此，在某种意义上，这两种样式是等效的，并且在方便性上都明显优于回调样式。但是，让我们更深入地研究 `sendEmailAsync` 和挂起 `sendEmail` 之间的区别。
+
+让我们先比较一下他们在代码中调用的方式。挂起函数可以像普通函数一样调用：
+
+```kotlin
+suspend fun largerBusinessProcess() {
+    // 这里有很多代码，接下来在某处……
+    sendEmail(emailArgs)
+    // ……后来又继续做了些别的事
+}
+```
+
+对应的异步风格函数这样调用：
+
+```kotlin
+fun largerBusinessProcessAsync() = future {
+    // 这里有很多代码，接下来在某处……
+    sendEmailAsync(emailArgs).await()
+    // ……后来又继续做了些别的事
+}
+```
+
+注意，异步风格的函数调用写法更冗长，更容易出错。如果在异步风格的示例中省略了 `.await()` 调用，代码仍然可以编译并工作，但现在它将异步发送电子邮件，甚至在执行较大业务流程的其余部分的同时发送电子邮件，因此可能会修改某些共享状态并引入一些非常难以重现的错误。相反，挂起函数默认是顺序的。对于挂起的函数，无论何时需要任何并发，都可以在代码中通过调用某种 `future{}` 或类似的协程建造者显式地表达。
 
 ### 包装回调
 
