@@ -36,7 +36,7 @@
   * [续体拦截器](#续体拦截器)
   * [受限挂起](#受限挂起)
 * [实现细节](#实现细节)
-  * [续体传递样式](#续体传递样式)
+  * [续体传递风格](#续体传递风格)
   * [状态机](#状态机)
   * [编译挂起函数](#编译挂起函数)
   * [协程本征](#协程本征)
@@ -580,7 +580,7 @@ interface SequenceScope<in T> {
 
 本节展现了协程实现细节的冰山一角。它们隐藏在[协程概述](#协程概述)部分解释的构造代码块背后，内部类和代码的生成策略在不打破公共 API 和 ABI 约定 的情况下随时可能改变。
 
-### 续体传递样式
+### 续体传递风格
 
 挂起函数通过 Continuation-Passing-Style (CPS) 实现。每个挂起函数和挂起 λ 都会在调用时隐式地传入一个附加的 `Continuation` 参数。回想一下，[`await` 挂起函数](#挂起函数) 的声明是这样的：
 
@@ -620,7 +620,7 @@ c(z)
 
 每个状态都是这个代码块续体的一个入口点（初始续体从第一行开始）。
 
-代码会被编译为一个匿名类，它的一个方法实现了这个状态机、一个字段持有状态机当前状态，状态之间共享的局部变量字段<u>（也可能有协程闭包的字段，但在这种情况下它是空的）？</u>。这是上文代码块通过续体传递样式调用挂起函数 `await` 的 Java 伪代码：
+代码会被编译为一个匿名类，它的一个方法实现了这个状态机、一个字段持有状态机当前状态，状态之间共享的局部变量字段<u>（也可能有协程闭包的字段，但在这种情况下它是空的）？</u>。这是上文代码块通过续体传递风格调用挂起函数 `await` 的 Java 伪代码：
 
 ```java
 lass <anonymous_for_state_machine> extends SuspendLambda<...> {
@@ -850,7 +850,69 @@ fun largerBusinessProcessAsync() = future {
 
 注意，异步风格的函数调用写法更冗长，更容易出错。如果在异步风格的示例中省略了 `.await()` 调用，代码仍然可以编译并工作，但现在它将异步发送电子邮件，甚至在执行较大业务流程的其余部分的同时发送电子邮件，因此可能会修改某些共享状态并引入一些非常难以重现的错误。相反，挂起函数默认是顺序的。对于挂起的函数，无论何时需要任何并发，都可以在代码中通过调用某种 `future{}` 或类似的协程建造者显式地表达。
 
+从这些风格在使用多个库的大型项目中的**比例**方面比较。挂起函数是 Kotlin 的一个轻量级语言概念。所有挂起函数在任何非限定性的 Kotlin  协程中都是完全可用的。异步风格的函数依赖于框架。每个 promises/futures 框架都必须定义自己的类 `async` 函数，该函数返回自己的 promise/future 类，这些类又有对应的类 `async` 函数。
+
+从**性能**方面比较。挂起函数提供最小的调用开销。你可以看[实现细节](#实现细节)一节。异步类型的函数对所有挂起机制需要额外持有相当重的诺言/期货抽象。异步样式的函数调用中必须返回一些期货的实例对象，并且即使函数非常简短，也无法将其优化掉。异步样式不太适合于非常细粒度的分解。
+
+从与 JVM/JS 代码的互操作性方面比较。使用对应类期货抽象的异步风格函数与 JVM/JS 代码更具互操作性。在 Java 或 JS 中，它们只是返回相应类期货对象的函数。对任何不原生支持[续体传递风格](#续体传递风格)的语言来说，挂起函数都很奇怪。但是从上面的示例中可以看出，对于任何给定的诺言/期货框架都很容易将任何挂起函数转换为异步风格的函数。因此，您只需用 Kotlin 编写一次挂起函数，然后使用适当的 `future{}` 协程建造者函数，通过一行代码对其进行调整，以实现与任何形式的诺言/期货的互操作性。
+
 ### 包装回调
+
+很多异步应用程序接口集包含回调风格的接口。标准库中的挂起函数 `suspendCoroutine` （见[挂起函数](#挂起函数)一节）提供了一种简单的把任何回调函数包装成 Kotlin 挂起函数的方法。
+
+这里有一个简单的例子。假设你有一个 `someLongCompution` 函数，他有一个回调参数，回调接受某种 `Value` 参数，这个 `Value` 是计算的结果。
+
+```kotlin
+fun someLongComputation(params: Params, callback: (Value) -> Unit)
+```
+
+你可以用下面这样的代码直截了当的把它变成挂起函数：
+
+```kotlin
+suspend fun someLongComputation(params: Params): Value = suspendCoroutine { cont ->
+    someLongComputation(params) { cont.resume(it) }
+} 
+```
+
+现在计算的返回值变成显式的了，但它还是异步的，也不会阻塞线程。
+
+> 注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 包含了一个协作式可取消协程框架。它提供类似 `suspendCoroutine`，但支持取消的 `suspendCancellableCoroutine` 函数。查看其指南中[取消时](http://kotlinlang.org/docs/reference/coroutines/cancellation-and-timeouts.html)一节了解更多细节。
+
+为了找一个更复杂的例子，我们看看[异步计算](#异步计算)用例中的 `aRead()` 函数。它可以实现为 Java 非阻塞输入输出中 [`AsynchronousFileChannel`](https://docs.oracle.com/javase/8/docs/api/java/nio/channels/AsynchronousFileChannel.html) 的挂起扩展函数，它的 [`CompletionHandler`](https://docs.oracle.com/javase/8/docs/api/java/nio/channels/CompletionHandler.html) 回调接口如下：
+
+```kotlin
+suspend fun AsynchronousFileChannel.aRead(buf: ByteBuffer): Int =
+    suspendCoroutine { cont ->
+        read(buf, 0L, Unit, object : CompletionHandler<Int, Unit> {
+            override fun completed(bytesRead: Int, attachment: Unit) {
+                cont.resume(bytesRead)
+            }
+
+            override fun failed(exception: Throwable, attachment: Unit) {
+                cont.resumeWithException(exception)
+            }
+        })
+    }
+```
+
+> 从[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/io/io.kt)获取代码。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中实际的实现支持取消以放弃长时间运行的输入输出操作。
+
+如果你需要处理大量有相同类型回调的函数，你可以定义一个公共包装函数简便地把他们全部转换成挂起函数。例如，[vert.x](http://vertx.io/) 有一个特有的约定，其中所有异步函数都接受一个 `Handler<AsyncResult<T>>` 回调。要通过协程简化任意的 vert.x 函数，可以定义下面这个辅助函数：
+
+```kotlin
+inline suspend fun <T> vx(crossinline callback: (Handler<AsyncResult<T>>) -> Unit) = 
+    suspendCoroutine<T> { cont ->
+        callback(Handler { result: AsyncResult<T> ->
+            if (result.succeeded()) {
+                cont.resume(result.result())
+            } else {
+                cont.resumeWithException(result.cause())
+            }
+        })
+    }
+```
+
+通过这个辅助函数，任意异步 vert.x 函数 `async.foo(params, handler)` 可以在协程中这样调用：`vx { async.foo(params, it) }`。
 
 ### 构造期货
 
