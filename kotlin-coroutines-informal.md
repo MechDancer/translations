@@ -1022,9 +1022,175 @@ interface SuspendingIterator<out T> {
 }
 ```
 
+`SuspendingSequence` 的定义类似于标准 [`Sequence`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.sequences/-sequence/index.html) 但返回 `SuspendingIterator`：
 
+```kotlin
+interface SuspendingSequence<out T> {
+    operator fun iterator(): SuspendingIterator<T>
+}
+```
+
+就像同步序列的作用域一样，我们也给它定义一个作用域接口，但它的挂起不是受限的：
+
+```kotlin
+interface SuspendingSequenceScope<in T> {
+    suspend fun yield(value: T)
+}
+```
+
+建造者函数 `suspendingSequence{}` 的用法和同步的 `sequence{}` 一样。
+
+它们的区别在于 `SuspendingIteratorCoroutine` 的实现细节以及在下面这种情况中，异步版本接受一个可选的上下文：
+
+```kotlin
+fun <T> suspendingSequence(
+    context: CoroutineContext = EmptyCoroutineContext,
+    block: suspend SuspendingSequenceScope<T>.() -> Unit
+): SuspendingSequence<T> = object : SuspendingSequence<T> {
+    override fun iterator(): SuspendingIterator<T> = suspendingIterator(context, block)
+}
+```
+
+> 从[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/suspendingSequence/suspendingSequence.kt)获取完整代码。注意：[kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中对 `Channel` 原语的实现使用了对应的协程建造者 `produce{}`，其中对同一个概念提供了更复杂的实现。
+
+我们可以用上[单线程多任务](#单线程多任务)一节的 `newSingleThreadContext{}` 上下文和[非阻塞睡眠](#非阻塞睡眠)一节的非阻塞的 `delay` 函数。
+
+这样我们就能写一个非阻塞序列的实现来生产1~10的整数，两数之间间隔500毫秒：
+
+```kotlin
+val seq = suspendingSequence(context) {
+    for (i in 1..10) {
+        yield(i)
+        delay(500L)
+    }
+}
+```
+
+现在消费者协程可以按自己喜欢的方式消费协程了，也可以被任意的挂起函数挂起。 注意，Kotlin [for 循环](https://kotlinlang.org/docs/reference/control-flow.html#for-loops)的工作方式满足这种序列的约定，因此语言中不需要一个专门的 `await for` 循环结构。普通的 `for` 循环就能用来遍历我们刚刚定义的异步序列。生产者没有值的时候它就会挂起：
+
+```kotlin
+for (value in seq) { // 等待生产者生产时挂起
+    // 在这里用值做些事，也可以在这里挂起
+}
+```
+
+>   [这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/suspendingSequence/suspendingSequence-example.kt)有写好的示例，其中用一些日志表示要执行的操作。
 
 ### 通道
+
+Go 风格的类型安全通道在 Kotlin 中通过库实现。我们可以为发送通道定义一个接口，包含挂起函数 `send`：
+
+```kotlin
+interface SendChannel<T> {
+    suspend fun send(value: T)
+    fun close()
+}
+```
+
+以及风格类似[异步序列](#异步序列)的接收通道，包含挂起函数 `receive` 和 `operator iterator`：
+
+```kotlin
+interface ReceiveChannel<T> {
+    suspend fun receive(): T
+    suspend operator fun iterator(): ReceiveIterator<T>
+}
+```
+
+`Channel<T>` 类同时实现这两个接口。通道缓存满时 `send` 挂起，通道缓存空时 `receive` 挂起。这样我们可以一字不差的复制 Go 风格的代码。[Go 教程的第4个并发示例](https://tour.golang.org/concurrency/4)中向通道发送 n 个斐波那契数的 `fibonacci` 函数用 Kotlin 实现起来是这样：
+
+```kotlin
+suspend fun fibonacci(n: Int, c: SendChannel<Int>) {
+    var x = 0
+    var y = 1
+    for (i in 0..n - 1) {
+        c.send(x)
+        val next = x + y
+        x = y
+        y = next
+    }
+    c.close()
+}
+```
+
+我们也可以定义 Go 风格的 `go {...}` 代码块在某种线程池上启动新协程，在固定数量的重量线程上调度任意多的轻量协程。[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/channel/go.kt)的示例实现写在 Java 通用的的 [`ForkJoinPool`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ForkJoinPool.html) 里。
+
+使用 `go` 协程建造者，对应的 Go 代码主函数看起来是下面这样，其中的`mainBlocking` 是简化的辅助函数，它在 `go{}` 的线程池上调用 `runBlocking`：
+
+```kotlin
+fun main(args: Array<String>) = mainBlocking {
+    val c = Channel<Int>(2)
+    go { fibonacci(10, c) }
+    for (i in c) {
+        println(i)
+    }
+}
+```
+
+> 在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/channel/channel-example-4.kt)查看代码
+
+你可以随意修改通道的缓冲区容量。为了简化，例子中只实现了缓冲通道（最小缓冲1个值），因为无缓冲通道在概念上和我们刚才见过的[异步序列](#异步序列)一样。
+
+Go 风格的 `select` 控制流，作用是挂起直到其中一个通道上的一个操作可以生效，可以用 Kotlin DSL 这样实现，因此 [Go 教程的第5个并发示例](https://tour.golang.org/concurrency/5)在 Kotlin 里看起来是这样：
+
+```kotlin
+suspend fun fibonacci(c: SendChannel<Int>, quit: ReceiveChannel<Int>) {
+    var x = 0
+    var y = 1
+    whileSelect {
+        c.onSend(x) {
+            val next = x + y
+            x = y
+            y = next
+            true // 继续 while 循环
+        }
+        quit.onReceive {
+            println("quit")
+            false // 退出 while 循环
+        }
+    }
+}
+```
+
+> 在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/channel/channel-example-5.kt)查看代码
+
+例子用到了 `select {...}` 实现，它选择一种情况并返回结果，就像 Kotlin 的 
+[`when` 表达式](https://kotlinlang.org/docs/reference/control-flow.html#when-expression)。还用到了一个方便的 `whileSelect { ... }`，它就是 `while(select<Boolean> { ... })`，但需要的括号比较少。
+
+实现 [Go 教程的第6个并发示例](https://tour.golang.org/concurrency/6)中的默认选项只需添加另一个选项到 `select {...}` DSL：
+
+```kotlin
+fun main(args: Array<String>) = mainBlocking {
+    val tick = Time.tick(100)
+    val boom = Time.after(500)
+    whileSelect {
+        tick.onReceive {
+            println("tick.")
+            true // continue loop
+        }
+        boom.onReceive {
+            println("BOOM!")
+            false // break loop
+        }
+        onDefault {
+            println("    .")
+            delay(50)
+            true // continue loop
+        }
+    }
+}
+```
+
+> 在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/channel/channel-example-6.kt)查看代码
+
+ [这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/channel/time.kt)的 `Time.tick` 和 `Time.after` 用非阻塞的 `delay` 函数实现非常简单。
+
+[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/channel/)能找到其他示例，注释里有对应的 Go 代码的链接。
+
+注意，这是通道的简单实现，只用了一个锁来管理内部的等待队列。这使得它容易理解和解释。但是，它从不在这个锁下运行用户代码，因此它是完全并发的。这个锁只在一定程度上限制了它对大量并发线程的可伸缩性。
+
+> 通道和 `select` 在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中的实际实现基于无锁的无冲突并发访问数据结构。
+
+这样实现的通道不影响协程上下文中的拦截器。 它可以用于用户界面应用程序，通过[续体拦截器](#续体拦截器)一节提到的事件线程拦截器，或者任何别的拦截器，或者不使用任何拦截器也可以（在后一种情况下，实际的执行线程完全由协程中使用的其他挂起函数的代码决定）。通道实现提供的挂起函数都是非阻塞且线程安全的。
 
 ### 互斥
 
