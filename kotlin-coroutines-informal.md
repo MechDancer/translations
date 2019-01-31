@@ -16,7 +16,7 @@
 设计目标：
 
 * 不依赖期货之类复杂的库提供的特定设施；
-* 涵盖 “async/await” 用例和 “生成器代码块”；
+* 涵盖 “async/await” 用例和 “生产者代码块”；
 * 可以同 Kotlin 协程实现现有的各种异步API（如 JAVA NIO、各种期货实现等）；
 
 ## 目录
@@ -24,7 +24,7 @@
 * [用例](#用例)
   * [异步计算](#异步计算)
   * [特性](#特性)
-  * [生成器](#生成器)
+  * [生产者](#生产者)
   * [异步用户界面](#异步用户界面)
   * [其他用例](#其他用例)
 * [协程概述](#协程概述)
@@ -148,7 +148,7 @@ val future = future {
 
 再一次地，协程对期货的支持减少了缩进级别、逻辑（以及异常处理，这里没有出现）更加自然，而且没有使用专门的关键字（比如 C#、JS 以及其他语言中的 `async` 和 `await`）:`future{}` 和 `await()` 都只是库函数而已。
 
-### 生成器
+### 生产者
 
 协程的另一个典型用例是延时计算序列（在 C#、Python 和很多其他语言中通过 `yield`  实现）。这样的序列可以由看似连续的代码生成，但在运行时只计算真正用到的元素。
 
@@ -175,7 +175,7 @@ println(fibonacci.take(10).joinToString())
 
 > 这会打印出 `1, 1, 2, 3, 5, 8, 13, 21, 34, 55 `。你可以在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/sequence/fibonacci.kt)试一下。
 
-生成器中支持任意的控制流，包括但不限于 `while`、`if`、`try`/`catch`/`finally`：
+生产者中支持任意的控制流，包括但不限于 `while`、`if`、`try`/`catch`/`finally`：
 
 ```kotlin
 val seq = sequence {
@@ -505,7 +505,7 @@ launch(Swing) {
 
 ### 限定挂起
 
-为例实现[生成器](#生成器)用例中的 `sequence{}` 和 `yield()`，需要另一类协程建造者和挂起函数。这是协程建造者 `sequence{}` 的示例代码：
+为例实现[生产者](#生产者)用例中的 `sequence{}` 和 `yield()`，需要另一类协程建造者和挂起函数。这是协程建造者 `sequence{}` 的示例代码：
 
 ```kotlin
 fun <T> sequence(block: suspend SequenceScope<T>.() -> Unit): Sequence<T> = Sequence {
@@ -522,7 +522,7 @@ fun <T> (suspend () -> T).createCoroutine(completion: Continuation<T>): Continua
 fun <R, T> (suspend R.() -> T).createCoroutine(receiver: R, completion: Continuation<T>): Continuation<Unit>
 ```
 
-另一个不同点是传递给建造者的*挂起 λ* `block` 是具有 `SequenceScope<T>` 接收者的[扩展 λ](https://kotlinlang.org/docs/reference/lambdas.html#function-literals-with-receiver)。`SequenceScope<T>` 接口提供了生成器代码块的作用域，其在库中定义如下：
+另一个不同点是传递给建造者的*挂起 λ* `block` 是具有 `SequenceScope<T>` 接收者的[扩展 λ](https://kotlinlang.org/docs/reference/lambdas.html#function-literals-with-receiver)。`SequenceScope<T>` 接口提供了生产者代码块的作用域，其在库中定义如下：
 
 ```kotlin
 interface SequenceScope<in T> {
@@ -547,7 +547,7 @@ private class SequenceCoroutine<T>: AbstractIterator<T>(), SequenceScope<T>, Con
         done()
     }
 
-    // 实现生成器
+    // 实现生产者
     override suspend fun yield(value: T) {
         setNext(value)
         return suspendCoroutine { cont -> nextStep = cont }
@@ -557,7 +557,7 @@ private class SequenceCoroutine<T>: AbstractIterator<T>(), SequenceScope<T>, Con
 
 > 你可以在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/sequence/sequence.kt)看到代码。注意，标准库提供了 [`sequence`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.sequences/sequence.html) 函数开箱即用的优化实现，而且还支持 [`yieldAll`](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.sequences/-sequence-scope/yield-all.html) 函数。
 
-> 实际使用的 `sequence` 代码使用了实验性的 `BuilderInference` 特性以支持[生成器](#生成器)一节中使用的不用显式指定序列类型参数 `T` 的 `fibonacci` 声明。其类型是从传给 `yield` 的参数类型推断得来的。
+> 实际使用的 `sequence` 代码使用了实验性的 `BuilderInference` 特性以支持[生产者](#生产者)一节中使用的不用显式指定序列类型参数 `T` 的 `fibonacci` 声明。其类型是从传给 `yield` 的参数类型推断得来的。
 
 `yield` 的实现中使用了 `suspendCoroutine` [挂起函数](#挂起函数)来挂起协程并捕获其续体。续体保存在 `nextStep` 中，并在调用 `computeNext` 时恢复。
 
@@ -760,7 +760,7 @@ sequenceOfLines("https://github.com/kotlin/kotlin-coroutines-examples/tree/maste
 
 协程恢复了几次，产生出文件的前三行，然后就被*遗弃* 了。遗弃对于协程本身来说没什么关系，但是对于打开了的文件则不然。[`use` 函数](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.io/use.html)没有机会结束调用并关闭文件。文件会一直开着，直到被垃圾收集器回收，因为 Java 的文件操作有个 `finalizer` 能关闭文件。如果只是个幻灯片或者短时间运行的小工具，这倒也不是什么问题，但是对于那些大型后端系统来说可就是个灾难了，因为它们有几个GB的堆存储，以至于在耗尽内存触发垃圾收集之前文件句柄先溢出了。
 
-这个问题和 Java 里生成行的惰性流的 [`Files.lines`](https://docs.oracle.com/javase/8/docs/api/java/nio/file/Files.html#lines-java.nio.file.Path-) 遇到的问题一样。它返回一个可关闭的 Java 流，但多数流操作不会自动调用对应的 `stream.close` 方法，需要用户自己记着关闭流。Kotlin 里也可以定义可关闭序列的生成器，当然也会遇到同一个问题，就是语言没有什么自动机制能保证它们在用完之后关闭。引入一种自动化资源管理的语言机制明显超出了 Kotlin 协程的领域。
+这个问题和 Java 里生成行的惰性流的 [`Files.lines`](https://docs.oracle.com/javase/8/docs/api/java/nio/file/Files.html#lines-java.nio.file.Path-) 遇到的问题一样。它返回一个可关闭的 Java 流，但多数流操作不会自动调用对应的 `stream.close` 方法，需要用户自己记着关闭流。Kotlin 里也可以定义可关闭序列的生产者，当然也会遇到同一个问题，就是语言没有什么自动机制能保证它们在用完之后关闭。引入一种自动化资源管理的语言机制明显超出了 Kotlin 协程的领域。
 
 然而，通常这个问题不会影响协程的异步用例。异步协程是不会被遗弃的，它会持续运行直到完毕。因此只要协程里的代码能正确地关闭其资源，资源最终就会被关闭。
 
@@ -1010,6 +1010,19 @@ fun main(args: Array<String>) {
 如果你的整个应用都在同一个线程上执行，你可以定义自己的辅助协程建造者，在其中硬编码一个适应你单线程执行机制的上下文。
 
 ### 异步序列
+
+[受限挂起](#受限挂起)一节提到的 `sequence{}` 协程建造者是一个*同步* 协程的示例。当消费者调用 `Iterator.next()` 时，协程的生产代码同步执行在同一个线程上。`sequence{}` 协程块是受限的，没法用第三方挂起函数挂起其执行，比如[包装回调](#包装回调)一节中那种异步文件输入输出。
+
+*异步的* 序列建造者支持随意挂起和恢复执行。这意味着其消费者要时刻准备着处理数据还没生产出来的情况。这是挂起函数的原生用例。我们来定义一个类似于普通 [`Iterator`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/-iterator/) 接口的 `SuspendingIterator` 接口，但其 `next()` 和 `hasNext()` 函数是挂起的：
+
+```kotlin
+interface SuspendingIterator<out T> {
+    suspend operator fun hasNext(): Boolean
+    suspend operator fun next(): T
+}
+```
+
+
 
 ### 通道
 
