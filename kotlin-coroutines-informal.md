@@ -40,6 +40,22 @@
   * [状态机](#状态机)
   * [编译挂起函数](#编译挂起函数)
   * [协程本征](#协程本征)
+* [附录](#附录)
+  * [资源管理与垃圾收集](#资源管理与垃圾收集)
+  * [并发和线程](#并发和线程)
+  * [异步编程风格](#异步编程风格)
+  * [包装回调](#包装回调)
+  * [构造期货](#构造期货)
+  * [非阻塞睡眠](#非阻塞睡眠)
+  * [协作式单线程多任务](#协作式单线程多任务)
+  * [异步序列](#异步序列)
+  * [通道](#通道)
+  * [互斥](#互斥)
+  * [从实验性协程移植](#从实验性协程移植)
+  * [参考](#参考)
+  * [反馈](#反馈)
+
+
 
 ## 用例
 
@@ -1193,6 +1209,42 @@ fun main(args: Array<String>) = mainBlocking {
 这样实现的通道不影响协程上下文中的拦截器。 它可以用于用户界面应用程序，通过[续体拦截器](#续体拦截器)一节提到的事件线程拦截器，或者任何别的拦截器，或者不使用任何拦截器也可以（在后一种情况下，实际的执行线程完全由协程中使用的其他挂起函数的代码决定）。通道实现提供的挂起函数都是非阻塞且线程安全的。
 
 ### 互斥
+
+编写可伸缩的异步应用程序应遵循一个原则，确保代码挂起（使用挂起函数）而不阻塞，即实际上不阻塞线程。Java并发原语 [`ReentrantLock`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/locks/ReentrantLock.html) 阻塞线程，不应在真正的非阻塞代码中使用。要控制对共享资源的访问，可以定义一个 `Mutex` 类，该类挂起协程的执行，而不是阻塞协程。
+
+这个类的声明看起来是这样：
+
+```kotlin
+class Mutex {
+    suspend fun lock()
+    fun unlock()
+}
+```
+
+> 你可以从[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/mutex/mutex.kt)获得完整的实现。在 [kotlinx.coroutines](https://github.com/kotlin/kotlinx.coroutines) 中的实际实现还有其他的一些函数。
+
+使用这个非阻塞互斥的实现，[Go教程的第9个并发示例](https://tour.golang.org/concurrency/9)可以用 Kotlin 的 [`try finally`](https://kotlinlang.org/docs/reference/exceptions.html) 翻译到 Kotlin，这与 Go 的 `defer` 作用相同：
+
+```kotlin
+class SafeCounter {
+    private val v = mutableMapOf<String, Int>()
+    private val mux = Mutex()
+
+    suspend fun inc(key: String) {
+        mux.lock()
+        try { v[key] = v.getOrDefault(key, 0) + 1 }
+        finally { mux.unlock() }
+    }
+
+    suspend fun get(key: String): Int? {
+        mux.lock()
+        return try { v[key] }
+        finally { mux.unlock() }
+    }
+}
+```
+
+> 在[这里](https://github.com/kotlin/kotlin-coroutines-examples/tree/master/examples/channel/channel-example-9.kt)查看代码
 
 ### 从实验性协程移植
 
