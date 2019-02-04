@@ -1,25 +1,24 @@
-# Kotlin Contracts
+# Kotlin 契约
 
-* Type: design proposal
-* Author: Dmitry Savvinov
-* Contributors: Stanislav Erokhin, Andrey Breslav, Mikhail Glukhih, Roman Elizarov, Ilya Ryzhenkov, Alexander Udalov
-* Status: submitted
-* Prototype: implemented
-* Discussion: [KEEP-139](https://github.com/Kotlin/KEEP/issues/139)
-
-
-## Summary
-
-Support a way to **explicitly** express some aspects of function's behavior, thus allowing programmers to cooperate with Kotlin compiler by providing it with additional guarantees, getting more complete and intense analysis in return.
+* 类型：设计提案
+* 作者： Dmitry Savvinov
+* 贡献者： Stanislav Erokhin, Andrey Breslav, Mikhail Glukhih, Roman Elizarov, Ilya Ryzhenkov, Alexander Udalov
+* 状态： 已提交
+* 原型： 已实现
+* 讨论: [KEEP-139](https://github.com/Kotlin/KEEP/issues/139)
 
 
-## Introduction
+## 概括
 
-### Motivation / use cases
+支持一种方式**显式**表达函数行为的默写方面，而允许程序员通过向 Kotlin 编译器提供额外的保证与之合作。作为回报，将获得更完整深入的分析。
 
-* Sometimes, compiler imposes overly conservative restrictions on some language constructs:
-    * _Example:_ Usually, **val initialization in capture** is forbidden, because arbitrary lambda can be called more than once (leading to reassignment), or not called at all (leaving property uninitialized)
-    *In some specific cases* (e.g. `run`, `synchronized`, etc.), function will call passed lambda exactly once, making initialization actually safe ([KT-6592](https://youtrack.jetbrains.com/issue/KT-6592))
+## 介绍
+
+### 动机 / 用例
+
+* 有时，编译器会对某些语言结构施加过于保守的限制：
+    * *示例* 通常情况下, 不允许**在捕获中初始化 val**，因为任意 lambda 表达式可以被调用不止一次（导致重新赋值），或者一此也没被调（导致属性未被初始化）。
+    *在一些特定情况*（如 `run`，`synchronized` 等。)，函数将调用传入 的lambda 表达式一次, 使初始化实际上是安全的。([KT-6592](https://youtrack.jetbrains.com/issue/KT-6592))
 
       ```kotlin
       fun test() {
